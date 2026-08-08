@@ -13,4 +13,4 @@ RUN python -m pip install --no-cache-dir --upgrade pip \
 
 EXPOSE 8080
 
-CMD ["sh", "-c", "uvicorn guancha_api.main:app --app-dir backend/src --host 0.0.0.0 --port ${PORT:-8080}"]
+CMD ["sh", "-c", "python backend/scripts/apply_migrations.py && exec uvicorn guancha_api.main:app --app-dir backend/src --host 0.0.0.0 --port ${PORT:-8080}"]
