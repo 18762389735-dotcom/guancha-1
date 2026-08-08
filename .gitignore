@@ -37,6 +37,9 @@ data/local/
 uploads/
 user-images/
 storage/
+# The application package is source code, not runtime storage.
+!backend/src/guancha_api/infrastructure/storage/
+!backend/src/guancha_api/infrastructure/storage/**
 test-results/
 playwright-report/
 blob-report/
