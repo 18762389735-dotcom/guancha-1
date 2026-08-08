@@ -1,0 +1,78 @@
+{
+  "schema_version": "prd-fixture-v1",
+  "fixtures": [
+    {"fixture_id":"candidate-a-complete-qingxiang","fixture_type":"extraction","path":"extraction/candidate_a_complete_qingxiang.json","prd_section":"§32.1 A","legacy_source_file":"backend/scripts/p0_trust_loop_tests.py","legacy_case_id":"complete-qingxiang-text","conversion_notes":"脱敏并转换为 PRD 核心字段；未保留旧证书或品牌可信度字段。","schema_version":"prd-fixture-v1","expected_use":["fake-provider","decision-engine","cache-fallback"],"contains_original_image":false},
+    {"fixture_id":"candidate-b-nongxiang-unknown-roast","fixture_type":"extraction","path":"extraction/candidate_b_nongxiang_unknown_roast.json","prd_section":"§32.1 B","legacy_source_file":"backend/scripts/text_extraction_tests.py","legacy_case_id":"T2","conversion_notes":"明确保留焙火 unknown，不从浓香型推导。","schema_version":"prd-fixture-v1","expected_use":["fake-provider","decision-engine"],"contains_original_image":false},
+    {"fixture_id":"candidate-c-marketing-heavy","fixture_type":"extraction","path":"extraction/candidate_c_marketing_heavy.json","prd_section":"§32.1 C","legacy_source_file":"backend/scripts/stage3c_eval.py","legacy_case_id":"TC-UGC-10","conversion_notes":"仅保留脱敏营销词与缺失字段；营销词不成为事实。","schema_version":"prd-fixture-v1","expected_use":["fake-provider","decision-engine","cache-fallback"],"contains_original_image":false},
+    {"fixture_id":"boundary-complete-fields","fixture_type":"extraction","path":"extraction/boundaries/complete_fields.json","prd_section":"§32.3 item 1","legacy_source_file":"backend/scripts/real_text_regression.py","legacy_case_id":"A1","conversion_notes":"完整字段边界，按当前 Evidence 枚举重写。","schema_version":"prd-fixture-v1","expected_use":["normalizer-test"],"contains_original_image":false},
+    {"fixture_id":"boundary-unknown-roast","fixture_type":"extraction","path":"extraction/boundaries/unknown_roast.json","prd_section":"§9.1","legacy_source_file":"backend/scripts/text_extraction_tests.py","legacy_case_id":"T2","conversion_notes":"未知字段不得补全。","schema_version":"prd-fixture-v1","expected_use":["normalizer-test"],"contains_original_image":false},
+    {"fixture_id":"boundary-missing-price","fixture_type":"extraction","path":"extraction/boundaries/missing_price.json","prd_section":"§9.1","legacy_source_file":"data/multimodal_extraction_schema_v1.json","legacy_case_id":"unit-price-guard","conversion_notes":"价格缺失时 unit_price 为 null。","schema_version":"prd-fixture-v1","expected_use":["normalizer-test"],"contains_original_image":false},
+    {"fixture_id":"boundary-missing-weight","fixture_type":"extraction","path":"extraction/boundaries/missing_weight.json","prd_section":"§9.1","legacy_source_file":"data/multimodal_extraction_schema_v1.json","legacy_case_id":"unit-price-guard","conversion_notes":"重量缺失时 unit_price 为 null。","schema_version":"prd-fixture-v1","expected_use":["normalizer-test"],"contains_original_image":false},
+    {"fixture_id":"boundary-conflicting-fields","fixture_type":"extraction","path":"extraction/boundaries/conflicting_fields.json","prd_section":"§10, §14.1","legacy_source_file":"backend/scripts/seller_reply_parse_tests.py","legacy_case_id":"spring-autumn-conflict","conversion_notes":"保留双方原始 Evidence，不覆盖页面字段。","schema_version":"prd-fixture-v1","expected_use":["merchant-reply-test","normalizer-test"],"contains_original_image":false},
+    {"fixture_id":"merchant-answered","fixture_type":"merchant-reply","path":"merchant-replies/answered.json","prd_section":"§32.2 明确回答","legacy_source_file":"backend/scripts/stage3c_eval.py","legacy_case_id":"TC-UGC-01","conversion_notes":"只转换明确 merchant claim，全部保持 unverified。","schema_version":"prd-fixture-v1","expected_use":["merchant-reply-test"],"contains_original_image":false},
+    {"fixture_id":"merchant-partially-answered","fixture_type":"merchant-reply","path":"merchant-replies/partially_answered.json","prd_section":"§32.2 部分回答","legacy_source_file":"backend/scripts/stage3c_eval.py","legacy_case_id":"TC-UGC-02","conversion_notes":"只更新明确回答字段，保留未回答字段。","schema_version":"prd-fixture-v1","expected_use":["merchant-reply-test"],"contains_original_image":false},
+    {"fixture_id":"merchant-evasive","fixture_type":"merchant-reply","path":"merchant-replies/evasive.json","prd_section":"§32.2 答非所问","legacy_source_file":"backend/scripts/stage3c_eval.py","legacy_case_id":"TC-UGC-10","conversion_notes":"营销式回复不生成目标字段事实。","schema_version":"prd-fixture-v1","expected_use":["merchant-reply-test"],"contains_original_image":false},
+    {"fixture_id":"merchant-conflicting","fixture_type":"merchant-reply","path":"merchant-replies/conflicting.json","prd_section":"§32.2 冲突","legacy_source_file":"backend/scripts/seller_reply_parse_tests.py","legacy_case_id":"spring-autumn-conflict","conversion_notes":"商家秋茶与页面春茶形成追加 conflict。","schema_version":"prd-fixture-v1","expected_use":["merchant-reply-test"],"contains_original_image":false}
+  ],
+  "demo_images": [
+    {
+      "fixture_id":"demo-a-qingxiang-image-1",
+      "candidate_fixture_id":"demo-candidate-a",
+      "image_role":"product-screenshot",
+      "display_order":1,
+      "path":"test-fixtures/demo-images/candidate-a-qingxiang-1.png",
+      "sha256":"9b299220b23ae3c55c9805f30a373367ff7b82ba4a7efbc8c134b4767df2bd94",
+      "source_sha256":"4bbf196a2f8247a70018a2073f33342a6bb4f33e19d41f0df7ad0680b22059ca",
+      "mime_type":"image/png",
+      "width":960,
+      "height":640,
+      "fixture_schema_version":"prd-fixture-v1",
+      "extraction_fixture_id":"candidate-a-complete-qingxiang",
+      "decision_expectation_id":"demo-a-complete-qingxiang",
+      "approved_for_cache_fallback":true,
+      "created_at":"2026-08-07"
+    },
+    {
+      "fixture_id":"demo-b-nongxiang-image-1",
+      "candidate_fixture_id":"demo-candidate-b",
+      "image_role":"product-screenshot",
+      "display_order":1,
+      "path":"test-fixtures/demo-images/candidate-b-nongxiang-1.png",
+      "sha256":"88bd64cf23af88fc5eca885858421158bb10bbc467aa8ce84da1f2fc341cbfe3",
+      "source_sha256":"02f161fb9c64695e775c6a22998beb9b597d174d8d6373ee99fcc2c21fb4869d",
+      "mime_type":"image/png",
+      "width":960,
+      "height":640,
+      "fixture_schema_version":"prd-fixture-v1",
+      "extraction_fixture_id":"candidate-b-nongxiang-unknown-roast",
+      "decision_expectation_id":"demo-b-nongxiang-unknown-roast",
+      "approved_for_cache_fallback":true,
+      "created_at":"2026-08-07"
+    },
+    {
+      "fixture_id":"demo-c-marketing-image-1",
+      "candidate_fixture_id":"demo-candidate-c",
+      "image_role":"product-screenshot",
+      "display_order":1,
+      "path":"test-fixtures/demo-images/candidate-c-marketing-heavy-1.png",
+      "sha256":"c0e2ab131fddcc6bd0343a203a84e8c7cdbce4a01184ef3cb84aa620ae4fa4c1",
+      "source_sha256":"d6ae1ccce8493763db24da09caaadf2341f0b6c4752a45a58e2f9bb319eabba8",
+      "mime_type":"image/png",
+      "width":960,
+      "height":640,
+      "fixture_schema_version":"prd-fixture-v1",
+      "extraction_fixture_id":"candidate-c-marketing-heavy",
+      "decision_expectation_id":"demo-c-marketing-heavy",
+      "approved_for_cache_fallback":true,
+      "created_at":"2026-08-07"
+    },
+    {"fixture_id":"demo-a-qingxiang-image-2","candidate_fixture_id":"demo-candidate-a","image_role":"product-screenshot","display_order":2,"path":"test-fixtures/demo-images/candidate-a-qingxiang-2.png","sha256":"5d6af4d0f7c604bc1be164e24c85b8e406d3b48c8a15b9d72a233424d398af72","source_sha256":"95c454ea80c693dad2d58a3b672b04dc0c88e48956977c2a8946a7df0145f491","mime_type":"image/png","width":960,"height":640,"fixture_schema_version":"prd-fixture-v1","extraction_fixture_id":"candidate-a-complete-qingxiang","decision_expectation_id":"demo-a-complete-qingxiang","approved_for_cache_fallback":true,"created_at":"2026-08-07"},
+    {"fixture_id":"demo-b-nongxiang-image-2","candidate_fixture_id":"demo-candidate-b","image_role":"product-screenshot","display_order":2,"path":"test-fixtures/demo-images/candidate-b-nongxiang-2.png","sha256":"9b8f1231ddfd711d18286527a33e7c3e8da6dcfa7fdb43bc55db68676fd26f6e","source_sha256":"52fec257009cfe249719ac89c632741c64bfd4fbe138aa3c35c32db141642154","mime_type":"image/png","width":960,"height":640,"fixture_schema_version":"prd-fixture-v1","extraction_fixture_id":"candidate-b-nongxiang-unknown-roast","decision_expectation_id":"demo-b-nongxiang-unknown-roast","approved_for_cache_fallback":true,"created_at":"2026-08-07"},
+    {"fixture_id":"demo-c-marketing-image-2","candidate_fixture_id":"demo-candidate-c","image_role":"product-screenshot","display_order":2,"path":"test-fixtures/demo-images/candidate-c-marketing-heavy-2.png","sha256":"3d116e0fbfa4998d269b7af019d449bfff0d8442e26220f8db56be3e3a2b2941","source_sha256":"1b76de39e2a07b500ec19b0f110a9552c395f6f858ce1f1e4f63fcc5a3a0769f","mime_type":"image/png","width":960,"height":640,"fixture_schema_version":"prd-fixture-v1","extraction_fixture_id":"candidate-c-marketing-heavy","decision_expectation_id":"demo-c-marketing-heavy","approved_for_cache_fallback":true,"created_at":"2026-08-07"}
+  ],
+  "demo_image_sets": [
+    {"candidate_fixture_id":"demo-candidate-a","image_fixture_ids":["demo-a-qingxiang-image-1","demo-a-qingxiang-image-2"],"image_set_fingerprint":"d568976cda10a16afa1e6cf8d1a3b077ac070914072075f9c7a41412ee1d4647","fixture_schema_version":"prd-fixture-v1","extraction_schema_version":"phase3-joint-images-v1","prompt_version":"openai-responses-v1","domain":"tieguanyin","extraction_fixture_id":"candidate-a-complete-qingxiang","approved_for_cache_fallback":true},
+    {"candidate_fixture_id":"demo-candidate-b","image_fixture_ids":["demo-b-nongxiang-image-1","demo-b-nongxiang-image-2"],"image_set_fingerprint":"f28ba695d05978154baff6e9d7af81c303d052972fdc45dea0c8d10028a3d90a","fixture_schema_version":"prd-fixture-v1","extraction_schema_version":"phase3-joint-images-v1","prompt_version":"openai-responses-v1","domain":"tieguanyin","extraction_fixture_id":"candidate-b-nongxiang-unknown-roast","approved_for_cache_fallback":true},
+    {"candidate_fixture_id":"demo-candidate-c","image_fixture_ids":["demo-c-marketing-image-1","demo-c-marketing-image-2"],"image_set_fingerprint":"7aba9cea7dc48ffdae27ecc0a90858ecdb84a5a9a221c6ecdafa0bf8976e7466","fixture_schema_version":"prd-fixture-v1","extraction_schema_version":"phase3-joint-images-v1","prompt_version":"openai-responses-v1","domain":"tieguanyin","extraction_fixture_id":"candidate-c-marketing-heavy","approved_for_cache_fallback":true}
+  ]
+}

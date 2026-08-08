@@ -1,0 +1,47 @@
+rule_version: v1
+rules:
+  - rule_id: RULE-PRICE-001
+    rule_version: v1
+    status: approved
+    prd_section: "12.3"
+    input_fields: [price, budget_text, sample_available]
+    condition: budget_mismatch_without_sample
+    action_bucket: not-recommended-now
+    reason: "预算与试错成本不匹配"
+    risk: "价格或规格不支持可接受试错"
+  - rule_id: RULE-ROAST-001
+    rule_version: v1
+    status: approved
+    prd_section: "12.3"
+    input_fields: [roast_level, taste_text, risk_attitude_text]
+    condition: roast_unknown
+    action_bucket: ask-before-buying
+    reason: "焙火程度是会改变体验判断的关键未知项"
+    risk: "不能从香型推导焙火程度"
+  - rule_id: RULE-STYLE-001
+    rule_version: v1
+    status: approved
+    prd_section: "12.3"
+    input_fields: [aroma_style, taste_text]
+    condition: style_conflict
+    action_bucket: not-recommended-now
+    reason: "明确香型与本次需求冲突"
+    risk: "本次需求不应被长期偏好替代"
+  - rule_id: RULE-MARKETING-001
+    rule_version: v1
+    status: approved
+    prd_section: "12.3"
+    input_fields: [marketing_claims, missing_fields]
+    condition: marketing_with_missing_core
+    action_bucket: insufficient-information
+    reason: "宣传表达不能替代关键商品信息"
+    risk: "营销词与可信度不存在等价关系"
+  - rule_id: RULE-INFO-TRANSPARENCY-001
+    rule_version: v1
+    status: approved
+    prd_section: "12.3"
+    input_fields: [tea_type, aroma_style, roast_level, season]
+    condition: core_information_insufficient
+    action_bucket: insufficient-information
+    reason: "关键字段不足以支持行动判断"
+    risk: "信息充分度不等同于商品真实性"

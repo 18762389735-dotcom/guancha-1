@@ -1,0 +1,65 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Literal, Protocol
+
+
+ReplyStatus = Literal['answered', 'partially-answered', 'evasive', 'not-answered', 'conflicting']
+
+
+@dataclass(frozen=True)
+class MerchantReplyParse:
+    reply_status: ReplyStatus
+    answered_fields: tuple[str, ...]
+    claims: tuple[dict[str, str], ...]
+    unresolved_fields: tuple[str, ...]
+    conflicts: tuple[str, ...]
+    coverage: int
+    ambiguity: int
+    should_rejudge: bool
+    warnings: tuple[str, ...] = ()
+
+
+class MerchantReplyReasoningProvider(Protocol):
+    async def parse_merchant_reply(self, *, field_key: str, raw_text: str, product_evidence: tuple[dict[str, object], ...]) -> MerchantReplyParse: ...
+
+
+class FakeMerchantReplyReasoningProvider:
+    """Deterministic test parser; production adapters must return this closed schema."""
+    async def parse_merchant_reply(self, *, field_key: str, raw_text: str, product_evidence: tuple[dict[str, object], ...]) -> MerchantReplyParse:
+        text = raw_text.lower()
+        if any(token in text for token in ('不知道', '不清楚', '以实物为准')):
+            return MerchantReplyParse('not-answered', (), (), (field_key,), (), 0, 0, False)
+        if any(token in text for token in ('老客户', '大师', '品质很好', '高山')):
+            return MerchantReplyParse('evasive', (), (), (field_key,), (), 0, 1, False)
+        # Keep the offline parser deliberately small, but cover every field that
+        # the question service may ask about.  A reply can remain partial; it
+        # must never be turned into a made-up fact merely to unblock a decision.
+        values = {
+            'roast_level': [('足火', 'heavy'), ('中火', 'medium'), ('轻火', 'light'), ('浓香', 'heavy'), ('清香', 'light')],
+            'aroma_style': [('兰花香', 'orchid'), ('花香', 'floral'), ('清香', 'fresh'), ('浓香', 'roasted')],
+            'season': [('春茶', 'spring'), ('秋茶', 'autumn')],
+            'sample_available': [('有小样', 'true'), ('可试饮', 'true'), ('没有小样', 'false'), ('不提供试饮', 'false')],
+            'return_policy': [('七天无理由', 'seven_day_return'), ('支持退货', 'return_supported'), ('不退不换', 'no_return')],
+            'origin_text': [('安溪', 'anxi'), ('感德', 'gande'), ('西坪', 'xiping'), ('祥华', 'xianghua')],
+            'tea_subtype': [('铁观音', 'tieguanyin'), ('黄金桂', 'huangjingui'), ('本山', 'benshan')],
+        }
+        if field_key in {'price', 'weight_grams', 'year_or_batch', 'process_text'}:
+            import re
+            patterns = {
+                'price': r'(?:￥|¥|价格\s*[:：]?)\s*(\d+(?:\.\d{1,2})?)',
+                'weight_grams': r'(\d+(?:\.\d+)?)\s*(?:g|克)',
+                'year_or_batch': r'((?:20)?\d{2}(?:年|春|秋)?(?:新茶|批次)?)',
+                'process_text': r'(传统工艺|手工制作|炭焙|电焙|轻焙|足火)',
+            }
+            found = re.search(patterns[field_key], raw_text, flags=re.IGNORECASE)
+            if found:
+                matched = (found.group(0), found.group(1))
+            else:
+                matched = None
+        else:
+            matched = next(((raw, value) for raw, value in values.get(field_key, ()) if raw in raw_text), None)
+        if matched is None:
+            return MerchantReplyParse('partially-answered', (), (), (field_key,), (), 0, 1, False)
+        conflict = any(row.get('field_name') == field_key and row.get('normalized_value') not in (None, matched[1]) for row in product_evidence)
+        return MerchantReplyParse('conflicting' if conflict else 'answered', (field_key,), ({'field_key': field_key, 'raw_text': matched[0], 'normalized_value': matched[1]},), () if not conflict else (field_key,), (field_key,) if conflict else (), 1, 0, True)

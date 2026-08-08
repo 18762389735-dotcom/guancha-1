@@ -1,0 +1,76 @@
+name: Baseline checks
+
+on:
+  push:
+    branches:
+      - main
+      - 'codex/**'
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Verify baseline without services or dependencies
+        shell: pwsh
+        run: ./scripts/verify-baseline.ps1
+
+  backend-contracts:
+    name: Backend contract tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install declared backend development dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -e "./backend[dev]"
+
+      - name: Run backend contract tests
+        run: python -m pytest backend/tests
+
+      - name: Verify application import and generated OpenAPI contract
+        run: |
+          python -c "from guancha_api.main import app; assert app.title == 'Guancha P0 API'"
+          python -c "from guancha_api.main import app; schema = app.openapi(); assert '/api/v1/candidates/{candidate_id}/images' in schema['paths']; assert '/api/v1/jobs/{job_id}' in schema['paths']"
+
+  backend-postgres-repository:
+    name: PostgreSQL repository integration tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: guancha_test
+          POSTGRES_USER: guancha
+          POSTGRES_PASSWORD: guancha
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U guancha -d guancha_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      TEST_DATABASE_URL: postgresql://guancha:guancha@localhost:5432/guancha_test
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install declared backend development dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -e "./backend[dev]"
+      - name: Run PostgreSQL repository integration tests
+        run: python -m pytest backend/tests/test_postgres_repository.py

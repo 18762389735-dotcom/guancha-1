@@ -1,0 +1,1 @@
+{"fixture_id":"merchant-evasive","schema_version":"prd-fixture-v1","fixture_kind":"merchant-reply","original_question":"请确认这款茶的焙火程度。","merchant_text":"我们这款很多老客户都喜欢，品质很好。","expected_reply_status":"evasive","expected_claims":[],"unresolved_fields":["roast_level"],"expected_conflicts":[],"should_trigger_rejudgement":false}

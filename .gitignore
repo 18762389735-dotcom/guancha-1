@@ -1,0 +1,49 @@
+# Local secrets and environment overrides
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Dependency caches and build artifacts
+node_modules/
+dist/
+build/
+.vite/
+.next/
+coverage/
+
+# Python caches and virtual environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Logs, local databases, and runtime data
+*.log
+logs/
+*.sqlite
+*.sqlite3
+*.db
+data/local/
+
+# User-uploaded and generated image assets
+uploads/
+user-images/
+storage/
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# Editor and operating-system files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

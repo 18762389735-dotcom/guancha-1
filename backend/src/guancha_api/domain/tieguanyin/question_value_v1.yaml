@@ -1,0 +1,24 @@
+minimum_value_score: 3
+field_relevance:
+  roast_level: 2
+  aroma_style: 2
+  season: 2
+  price: 2
+  sample_available: 2
+  return_policy: 2
+  origin_text: 1
+  year_or_batch: 1
+  weight_grams: 1
+  process_text: 1
+field_answerability:
+  roast_level: 2
+  aroma_style: 2
+  season: 2
+  price: 2
+  sample_available: 2
+  return_policy: 2
+  origin_text: 1
+  year_or_batch: 1
+  weight_grams: 1
+  process_text: 1
+interaction_cost: 1

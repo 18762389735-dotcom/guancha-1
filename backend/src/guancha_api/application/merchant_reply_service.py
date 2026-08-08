@@ -1,0 +1,137 @@
+from __future__ import annotations
+
+from uuid import UUID, uuid4
+
+from guancha_api.repositories.idempotency import request_hash
+from guancha_api.application.task_runners import InProcessTaskRunner, ManualTaskRunner
+from guancha_api.domain.tieguanyin.decision import evaluate_candidate, rank_within_buckets
+from guancha_api.domain.tieguanyin.rules.rule_schema import load_approved_rules
+from guancha_api.repositories.postgres import PostgresPhase2Repository, StoredJob
+from guancha_api.schemas.contracts import CreateMerchantReplyRequest, ErrorCode, MerchantReply
+from guancha_api.providers.merchant_reply import FakeMerchantReplyReasoningProvider, MerchantReplyReasoningProvider
+
+
+class MerchantReplyService:
+    def __init__(self, repository: PostgresPhase2Repository, provider: MerchantReplyReasoningProvider | None = None) -> None:
+        self.repository = repository
+        self.provider = provider or FakeMerchantReplyReasoningProvider()
+
+    async def submit(self, *, session_id: UUID, client_id: UUID, idempotency_key: UUID, request: CreateMerchantReplyRequest) -> MerchantReply:
+        row, _ = await self.repository.create_or_replay_merchant_reply(
+            reply_id=uuid4(), session_id=session_id, client_id=client_id,
+            decision_version_id=request.decision_version_id, followup_question_id=request.followup_question_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash({"session_id": str(session_id), **request.model_dump(mode="json")}), raw_text=request.raw_text,
+        )
+        return self._dto(row)
+
+    async def get(self, *, reply_id: UUID, client_id: UUID) -> MerchantReply:
+        return self._dto(await self.repository.get_merchant_reply_for_client(reply_id=reply_id, client_id=client_id))
+
+    async def rejudge(
+        self, *, session_id: UUID, client_id: UUID, idempotency_key: UUID,
+        task_runner: InProcessTaskRunner | ManualTaskRunner,
+    ) -> StoredJob:
+        # The public action is session-scoped.  An anchor is retained only as
+        # an internal audit/linkage field for the legacy non-null Job column.
+        reply_id = await self.repository.aggregate_rejudge_anchor(session_id=session_id, client_id=client_id)
+        fingerprint = request_hash({"session_id": str(session_id), "operation": "aggregate_merchant_rejudge"})
+        job, created = await self.repository.create_merchant_rejudgement_job(
+            job_id=uuid4(), session_id=session_id, client_id=client_id, reply_id=reply_id,
+            idempotency_key=idempotency_key, request_hash=fingerprint,
+        )
+        if created:
+            await task_runner.enqueue(
+                job_id=job.id,
+                task=lambda: self.run_rejudge(job_id=job.id, reply_id=reply_id, client_id=client_id, fingerprint=fingerprint),
+            )
+        return job
+
+    async def run_rejudge(self, *, job_id: UUID, reply_id: UUID, client_id: UUID, fingerprint: str) -> None:
+        if not await self.repository.claim_job(job_id=job_id):
+            return
+        try:
+            # Parse every saved answer first.  Saving one answer must never stale
+            # the parent decision and prevent a reply for another candidate.
+            _anchor, _parent, _inputs, replies, _claims = await self.repository.merchant_rejudgement_batch(
+                anchor_reply_id=reply_id, client_id=client_id
+            )
+            for saved in replies:
+                if saved["processing_status"] == "queued":
+                    await self.parse(reply_id=saved["id"], client_id=client_id)
+            reply_context, parent, inputs, replies, all_claims = await self.repository.merchant_rejudgement_batch(
+                anchor_reply_id=reply_id, client_id=client_id
+            )
+            parsed_claims = [claim for claim in all_claims if claim["normalized_value"] is not None]
+            for item in inputs:
+                item["evidence"] = list(item["evidence"])
+                for claim in parsed_claims:
+                    if item["candidate_id"] != claim["candidate_id"]:
+                        continue
+                    item["evidence"].extend(
+                        [{
+                            "field_name": claim["field_key"], "normalized_value": claim["normalized_value"],
+                            "information_status": claim["information_status"], "source_type": "merchant-claim",
+                            "verification_status": "unverified", "evidence_strength": claim["evidence_strength"],
+                        }]
+                    )
+            drafts = [
+                evaluate_candidate(
+                    candidate_id=item["candidate_id"], extraction_version_id=item["extraction_version_id"],
+                    need=parent["need_snapshot"], evidence=item["evidence"], rules=load_approved_rules(),
+                )
+                for item in inputs
+            ]
+            ranked = rank_within_buckets(drafts)
+            bucket_ranks: dict[object, int] = {}
+            decisions: list[dict[str, object]] = []
+            for overall_order, draft in enumerate(ranked, start=1):
+                bucket_ranks[draft.action_bucket] = bucket_ranks.get(draft.action_bucket, 0) + 1
+                decisions.append({
+                    "id": uuid4(), "candidate_id": draft.candidate_id, "extraction_version_id": draft.extraction_version_id,
+                    "action_bucket": draft.action_bucket.value, "rank_within_bucket": bucket_ranks[draft.action_bucket],
+                    "overall_order": overall_order, "reasons": list(draft.reasons), "risk_flags": list(draft.risk_flags),
+                    "missing_critical_fields": list(draft.missing_critical_fields), "score_components": draft.score_components,
+                    "internal_score": draft.internal_score,
+                })
+            old_decisions = await self.repository.get_decision_version_for_client(version_id=reply_context["decision_version_id"], client_id=client_id)
+            old_top = old_decisions[0]["top_candidate_id"]
+            old_by_candidate = {row["candidate_id"]: row for row in old_decisions[1]}
+            changed = [str(row["candidate_id"]) for row in decisions if old_by_candidate.get(row["candidate_id"], {}).get("action_bucket") != row["action_bucket"]]
+            delta = {
+                "id": uuid4(), "added_facts": [claim["field_key"] for claim in parsed_claims],
+                "updated_fields": [claim["field_key"] for claim in parsed_claims],
+                "unresolved_fields": [reply["field_key"] for reply in replies if reply["parse_status"] in {"evasive", "not-answered", "partially-answered"}],
+                "resolved_risks": [], "added_risks": [claim["field_key"] for claim in parsed_claims if claim["information_status"] == "conflict"],
+                "ranking_changed": old_top != decisions[0]["candidate_id"], "action_tier_changed": bool(changed),
+                "old_top_candidate_id": old_top, "new_top_candidate_id": decisions[0]["candidate_id"],
+                "explanation": "Saved merchant replies were aggregated and the current decision was recomputed.",
+            }
+            await self.repository.complete_aggregate_merchant_rejudgement(
+                job_id=job_id, client_id=client_id, anchor_reply_id=reply_id,
+                reply_ids=tuple(reply["id"] for reply in replies), version_id=uuid4(), decisions=decisions,
+                delta=delta, input_fingerprint=fingerprint,
+            )
+        except Exception:
+            await self.repository.fail_aggregate_merchant_rejudgement(job_id=job_id, error_code=ErrorCode.AI_SCHEMA_INVALID)
+            raise
+
+    async def parse(self, *, reply_id: UUID, client_id: UUID) -> None:
+        claimed = await self.repository.claim_merchant_reply_for_parse(reply_id=reply_id, client_id=client_id)
+        if claimed is None:
+            return
+        reply, product_evidence = claimed
+        try:
+            parsed = await self.provider.parse_merchant_reply(
+                field_key=reply["field_key"], raw_text=reply["raw_text"], product_evidence=product_evidence
+            )
+            await self.repository.persist_merchant_reply_parse(
+                reply_id=reply_id, client_id=client_id, parsed_status=parsed.reply_status, claims=parsed.claims
+            )
+        except Exception:
+            await self.repository.fail_merchant_reply_parse(reply_id=reply_id, client_id=client_id)
+            raise
+
+    @staticmethod
+    def _dto(row: dict[str, object]) -> MerchantReply:
+        return MerchantReply(id=row["id"], selection_session_id=row["selection_session_id"], decision_version_id=row["decision_version_id"], followup_question_id=row["followup_question_id"], candidate_id=row["candidate_id"], raw_text=row["raw_text"], status=row["status"], processing_status=row["processing_status"], parse_status=row.get("parse_status"), created_at=row["created_at"])
