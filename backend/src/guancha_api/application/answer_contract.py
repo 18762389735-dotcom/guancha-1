@@ -80,7 +80,7 @@ def build_sensory_interpretations(evidence_items: list[dict[str, object]]) -> li
         field = str(item.get("field_name") or "")
         values = _text_values(item.get("normalized_value"))
         prefix = _source_prefix(item)
-        if field == "aroma_style":
+        if field in {"aroma_style", "roast_or_style"}:
             if any(token in value for value in values for token in ("qingxiang", "清香")):
                 add(item, label="清香型线索", text=f"如果{prefix}清香型描述准确，整体风格通常更偏清鲜、轻扬。", boundary="这不代表已验证这款茶一定有某种花香。", kind="sensory")
             elif any(token in value for value in values for token in ("nongxiang", "浓香")):

@@ -14,6 +14,14 @@ def test_qingxiang_and_light_roast_have_bounded_interpretations() -> None:
     assert "不代表具体商品已经验证没有火味" in hints[1]["boundary"]
 
 
+def test_legacy_roast_or_style_keeps_explicit_aroma_direction() -> None:
+    hints = build_sensory_interpretations([_evidence("roast_or_style", "浓香型")])
+    assert len(hints) == 1
+    assert hints[0]["source_field"] == "roast_or_style"
+    assert "熟香、醇厚方向" in hints[0]["interpretation"]
+    assert "实际浓度已被验证" in hints[0]["boundary"]
+
+
 def test_heavy_roast_is_not_a_quality_judgement() -> None:
     hints = build_sensory_interpretations([_evidence("roast_level", "heavy")])
     assert "熟香和焙火存在感通常会更明显" in hints[0]["interpretation"]

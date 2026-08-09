@@ -44,7 +44,15 @@
     const lines = [];
     if (explicitNeed) lines.push(`这次你明确想找${explicitNeed}，本次判断会优先按这个方向。`);
     if (sensoryInterpretations.length) {
-      lines.push('这款目前能确认的风格线索，会作为判断它是否接近你这次需求的依据。');
+      const sensoryText = sensoryInterpretations.map((item) => item.text || '').join(' ');
+      const seeksFresh = /清爽|清鲜|花香|火味不要/.test(String(need.taste || ''));
+      if (seeksFresh && /清鲜、轻扬|火味存在感通常较低/.test(sensoryText)) {
+        lines.push('这款目前的清香或低火味线索，更接近你这次想找的清爽花香方向。');
+      } else if (seeksFresh && /熟香、醇厚方向|焙火存在感通常会更明显/.test(sensoryText)) {
+        lines.push('这款目前更偏熟香或焙火方向，和你这次想找的清爽花香相比，可能更偏另一种风格。');
+      } else {
+        lines.push('这款目前能确认的风格线索，会作为判断它是否接近你这次需求的依据。');
+      }
     } else {
       lines.push('目前能确认的信息还不足以判断它是否符合你这次的口味方向。');
     }

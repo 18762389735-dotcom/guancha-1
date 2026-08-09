@@ -33,3 +33,12 @@ test('missing sensory evidence stays cautious', () => {
   const presentation = adapters().buildPersonalFitPresentation({ need: { taste: '清爽花香' } });
   assert.match(presentation.lines[1], /还不足以判断/);
 });
+
+test('controlled sensory evidence can explain a different fit without ranking', () => {
+  const presentation = adapters().buildPersonalFitPresentation({
+    need: { taste: '清爽花香' },
+    sensoryInterpretations: [{ text: '如果商品页的浓香型描述准确，风格通常更偏熟香、醇厚方向。' }],
+  });
+  assert.match(presentation.lines[1], /更偏另一种风格/);
+  assert.doesNotMatch(presentation.lines[1], /首选|排名|一定/);
+});
