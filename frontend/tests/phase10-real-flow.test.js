@@ -129,5 +129,5 @@ test('result view puts personal fit before evidence and keeps evidence provenanc
   const sensory = source.indexOf('<h3>这些专业信息可能意味着什么</h3>');
   const facts = source.indexOf('<h3>商品页目前能确认</h3>');
   assert.ok(fit >= 0 && sensory > fit && facts > sensory);
-  assert.match(source, /\$\{escapeHtml\(item\.value\)\}<small>\$\{escapeHtml\(item\.basis\)\}<\/small>/);
+  assert.match(source, /\$\{escapeHtml\(item\.value\)\}<\/span><small>\$\{escapeHtml\(item\.basis\)\}<\/small>/);
 });
