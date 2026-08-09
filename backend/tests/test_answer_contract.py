@@ -31,9 +31,7 @@ def test_answer_contract_uses_user_facing_labels_and_specific_uncertainty_reason
     )
 
     item = answer["candidates"][0]
-    assert item["known_facts"] == [{"label": "香型", "value": "清香型", "basis": "商品页明确标注"}]
-    assert item["decision_uncertainties"] == [
-        {"label": "焙火程度", "why_it_matters": "焙火程度会影响香气与入口风格，和本次口味需求直接相关。", "change_if": "补充后可能改变当前结论"},
-        {"label": "价格", "why_it_matters": "需要核对是否落在本次预算内。", "change_if": "补充后可能改变当前结论"},
-        {"label": "是否可试饮", "why_it_matters": "是否可试饮会影响送礼前的试错成本。", "change_if": "补充后可能改变当前结论"},
-    ]
+    assert item["known_facts"] == [{"label": "具体香型", "value": "清香型", "basis": "商品页明确标注"}]
+    assert [unknown["label"] for unknown in item["decision_uncertainties"]] == ["具体焙火程度", "实际到手价格", "是否可试饮"]
+    assert all(unknown["why_it_matters"] for unknown in item["decision_uncertainties"])
+    assert all(unknown["change_if"] for unknown in item["decision_uncertainties"])

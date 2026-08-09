@@ -13,6 +13,7 @@ import pytest
 from guancha_api.domain.tieguanyin.decision import evaluate_candidate, rank_within_buckets
 from guancha_api.domain.tieguanyin.rules import load_approved_rules
 from guancha_api.application.question_service import QuestionGenerationService, _question_text
+from guancha_api.application.answer_contract import build_selection_answer
 from guancha_api.schemas.contracts import ActionBucket
 
 
@@ -135,6 +136,96 @@ def test_m8_current_need_dominates_low_confidence_preference() -> None:
     nong = _draft(need={"taste_text": "qingxiang"}, evidence=_evidence(**{**FULL, "aroma_style": "nongxiang"}), recent=recent)
     ranked = rank_within_buckets([nong, qing])
     assert ranked[0].candidate_id == qing.candidate_id
+
+
+def test_explicit_fresh_style_need_breaks_a_same_bucket_tie() -> None:
+    need = {"taste_text": "清爽花香"}
+    nong = _draft(need=need, evidence=_evidence(**{**FULL, "aroma_style": "nongxiang"}))
+    qing = _draft(need=need, evidence=_evidence(**FULL))
+    assert nong.action_bucket is qing.action_bucket
+    assert qing.score_components["explicit_sensory_need_match"] > nong.score_components["explicit_sensory_need_match"]
+    assert rank_within_buckets([nong, qing])[0].candidate_id == qing.candidate_id
+
+
+def test_explicit_chinese_style_values_use_the_same_bounded_tiebreak() -> None:
+    need = {"taste_text": "清爽花香"}
+    nong = _draft(need=need, evidence=_evidence(**{**FULL, "aroma_style": "浓香型"}))
+    qing = _draft(need=need, evidence=_evidence(**{**FULL, "aroma_style": "清香型"}))
+    assert nong.action_bucket is qing.action_bucket
+    assert rank_within_buckets([nong, qing])[0].candidate_id == qing.candidate_id
+
+
+def test_explicit_low_fire_need_breaks_a_same_bucket_tie() -> None:
+    need = {"taste_text": "怕明显火味"}
+    heavy = _draft(need=need, evidence=_evidence(**{**FULL, "roast_level": "heavy"}))
+    light = _draft(need=need, evidence=_evidence(**FULL))
+    assert heavy.action_bucket is light.action_bucket
+    assert rank_within_buckets([heavy, light])[0].candidate_id == light.candidate_id
+
+
+def test_explicit_rich_need_is_not_a_qingxiang_preference() -> None:
+    need = {"taste_text": "喜欢熟香、焙火感明显一些"}
+    rich = _draft(need=need, evidence=_evidence(**{**FULL, "aroma_style": "nongxiang", "roast_level": "heavy"}))
+    fresh = _draft(need=need, evidence=_evidence(**FULL))
+    assert rich.action_bucket is fresh.action_bucket
+    assert rank_within_buckets([fresh, rich])[0].candidate_id == rich.candidate_id
+
+
+def test_missing_need_or_marketing_or_unknown_evidence_cannot_create_sensory_tiebreak() -> None:
+    no_need_qing = _draft(evidence=_evidence(**FULL))
+    no_need_nong = _draft(evidence=_evidence(**{**FULL, "aroma_style": "nongxiang"}))
+    marketing = _draft(need={"taste_text": "清爽花香"}, evidence=_evidence(**{**FULL, "aroma_style": None, "marketing_claims": "兰花香"}))
+    unknown = _draft(need={"taste_text": "清爽花香"}, evidence=_evidence(**{**FULL, "aroma_style": None}) + [{"field_name": "aroma_style", "normalized_value": "qingxiang", "information_status": "unknown"}])
+    assert no_need_qing.score_components["explicit_sensory_need_match"] == 0
+    assert no_need_nong.score_components["explicit_sensory_need_match"] == 0
+    assert marketing.score_components["explicit_sensory_need_match"] == 0
+    assert unknown.score_components["explicit_sensory_need_match"] == 0
+
+
+def test_bucket_priority_stays_above_explicit_sensory_need() -> None:
+    need = {"taste_text": "清爽花香"}
+    qing_with_conflict = _draft(need=need, evidence=_evidence(**FULL) + [{"field_name": "season", "normalized_value": "autumn", "information_status": "conflict"}])
+    nong = _draft(need=need, evidence=_evidence(**{**FULL, "aroma_style": "nongxiang"}))
+    assert qing_with_conflict.action_bucket is ActionBucket.NOT_RECOMMENDED_NOW
+    assert rank_within_buckets([qing_with_conflict, nong])[0].candidate_id == nong.candidate_id
+
+
+def test_rejudge_uses_the_same_evaluator_after_explicit_roast_claims_arrive() -> None:
+    need = {"taste_text": "怕明显火味"}
+    before_a = _draft(need=need, evidence=_evidence(**{**FULL, "roast_level": None}))
+    before_b = _draft(need=need, evidence=_evidence(**{**FULL, "roast_level": None}))
+    assert before_a.score_components["explicit_sensory_need_match"] == before_b.score_components["explicit_sensory_need_match"] == 0
+    after_a = _draft(need=need, evidence=_evidence(**{**FULL, "roast_level": "heavy"}))
+    after_b = _draft(need=need, evidence=_evidence(**FULL))
+    assert rank_within_buckets([after_a, after_b])[0].candidate_id == after_b.candidate_id
+
+
+def test_answer_keeps_the_backend_explicit_sensory_order() -> None:
+    need = {"taste_text": "清爽花香"}
+    nong = _draft(need=need, evidence=_evidence(**{**FULL, "aroma_style": "nongxiang"}))
+    qing = _draft(need=need, evidence=_evidence(**FULL))
+    ranked = rank_within_buckets([nong, qing])
+    decisions = [
+        {
+            "candidate_id": draft.candidate_id,
+            "overall_order": index,
+            "action_bucket": draft.action_bucket.value,
+            "reasons": list(draft.reasons),
+            "missing_critical_fields": list(draft.missing_critical_fields),
+            "risk_flags": list(draft.risk_flags),
+        }
+        for index, draft in enumerate(ranked, start=1)
+    ]
+    answer = build_selection_answer(
+        version={"id": uuid4(), "selection_session_id": uuid4(), "top_candidate_id": ranked[0].candidate_id},
+        decisions=decisions,
+        candidates=[
+            {"candidate_id": nong.candidate_id, "display_name": "浓香候选", "display_label": "候选茶 A", "evidence": _evidence(**{**FULL, "aroma_style": "nongxiang"})},
+            {"candidate_id": qing.candidate_id, "display_name": "清香候选", "display_label": "候选茶 B", "evidence": _evidence(**FULL)},
+        ],
+        questions=[],
+    )
+    assert answer["candidates"][0]["candidate_id"] == qing.candidate_id
 
 
 def test_m9_price_removal_cannot_become_budget_fit() -> None:

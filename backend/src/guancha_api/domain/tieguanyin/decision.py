@@ -73,16 +73,21 @@ def evaluate_candidate(
     bucket = max(buckets, key=lambda item: _BUCKET_ORDER[item])
 
     confidence = max(0, 4 - len(missing))
+    explicit_sensory_need = _explicit_sensory_need_match(need.get("taste_text"), evidence)
     match = (
         _text_match(need.get("taste_text"), values.get("aroma_style"))
         + _roast_match(need.get("taste_text"), values.get("roast_level"))
         + _purpose_match(need.get("purpose_text"), values)
     )
+    if explicit_sensory_need > 0:
+        reasons.append("当前明确的感官方向与页面已标注的风格线索更接近")
+    elif explicit_sensory_need < 0:
+        reasons.append("页面已标注的风格线索与当前明确的感官方向存在偏离")
     budget = _budget_fit(need.get("budget_text"), values.get("price"))
     trial = 1 if values.get("sample_available") is True else 0
     risk_penalty = _BUCKET_ORDER[bucket]
     personal = _low_confidence_preference_delta(values, recent_preference_evidence or [])
-    score = Decimal(match + budget + confidence + trial - risk_penalty + personal)
+    score = Decimal(explicit_sensory_need + match + budget + confidence + trial - risk_penalty + personal)
     return CandidateDecisionDraft(
         candidate_id,
         extraction_version_id,
@@ -91,6 +96,7 @@ def evaluate_candidate(
         tuple(dict.fromkeys(risks))[:3],
         tuple(missing),
         {
+            "explicit_sensory_need_match": explicit_sensory_need,
             "need_match": match,
             "budget_fit": budget,
             "evidence_sufficiency": confidence,
@@ -107,6 +113,7 @@ def rank_within_buckets(drafts: list[CandidateDecisionDraft]) -> list[CandidateD
         drafts,
         key=lambda item: (
             _BUCKET_ORDER[item.action_bucket],
+            -item.score_components["explicit_sensory_need_match"],
             -item.score_components["need_match"],
             -item.score_components["budget_fit"],
             -item.score_components["trial_friendliness"],
@@ -216,6 +223,75 @@ def _text_match(text: Any, style: Any) -> int:
     if (wants_qing and is_nong) or (wants_nong and is_qing):
         return -1
     return 0
+
+
+def _explicit_sensory_need_match(text: Any, evidence: list[dict[str, Any]]) -> int:
+    """Return a bounded same-bucket signal from current need and explicit style facts.
+
+    This is deliberately separate from ``_text_match`` because the latter also
+    feeds frozen hard-conflict rules.  Everyday wording such as ``清爽`` should
+    break a same-tier tie when the page explicitly gives a style direction, but
+    must not silently promote or demote an action bucket.
+    """
+    wanted = str(text or "").lower()
+    if not wanted:
+        return 0
+    explicit: dict[str, str] = {}
+    for item in evidence:
+        field = str(item.get("field_name") or "")
+        value = item.get("normalized_value")
+        if field in {"aroma_style", "roast_level"} and item.get("information_status") == InformationStatus.EXPLICIT.value and value not in (None, "", "unknown"):
+            explicit[field] = str(value).lower()
+
+    style = explicit.get("aroma_style", "")
+    roast = explicit.get("roast_level", "")
+    score = 0
+    wants_qing = any(token in wanted for token in ("qingxiang", "清香", "清爽", "清鲜"))
+    wants_rich = any(token in wanted for token in ("nongxiang", "浓香", "熟香", "浓郁"))
+    style_direction = _style_direction(style)
+    roast_direction = _roast_direction(roast)
+    if wants_qing:
+        if style_direction == "qing":
+            score += 1
+        elif style_direction == "nong":
+            score -= 1
+    elif wants_rich:
+        if style_direction == "nong":
+            score += 1
+        elif style_direction == "qing":
+            score -= 1
+
+    avoids_fire = any(token in wanted for token in ("怕火", "怕明显火味", "火味少", "低火", "轻焙", "不想火味", "不希望火味"))
+    wants_fire = any(token in wanted for token in ("喜欢焙火", "焙火感明显", "火味明显", "重焙", "浓焙", "高焙", "熟香", "浓郁"))
+    if avoids_fire:
+        if roast_direction == "light":
+            score += 1
+        elif roast_direction in {"medium", "heavy"}:
+            score -= 1
+    elif wants_fire:
+        if roast_direction in {"medium", "heavy"}:
+            score += 1
+        elif roast_direction == "light":
+            score -= 1
+    return max(-2, min(2, score))
+
+
+def _style_direction(value: str) -> str:
+    if "qingxiang" in value or "清香" in value:
+        return "qing"
+    if "nongxiang" in value or "浓香" in value:
+        return "nong"
+    return ""
+
+
+def _roast_direction(value: str) -> str:
+    if any(token in value for token in ("light", "轻焙", "低焙", "轻火")):
+        return "light"
+    if any(token in value for token in ("heavy", "重焙", "高焙", "浓焙", "足火")):
+        return "heavy"
+    if any(token in value for token in ("medium", "中焙", "中火")):
+        return "medium"
+    return ""
 
 
 def _roast_match(text: Any, roast: Any) -> int:
