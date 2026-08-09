@@ -12,12 +12,13 @@
       <section class="app-screen" id="app" aria-live="polite"></section>
     </main>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <input id="album-input" type="file" accept="image/jpeg,image/png" hidden />
-    <input id="camera-input" type="file" accept="image/jpeg,image/png" capture="environment" hidden />
-    <input id="candidate-image-input" type="file" accept="image/jpeg,image/png" hidden />
+      <input id="album-input" type="file" accept="image/jpeg,image/png,image/heic,image/heif,.heic,.heif" hidden />
+      <input id="camera-input" type="file" accept="image/jpeg,image/png,image/heic,image/heif,.heic,.heif" capture="environment" hidden />
+      <input id="candidate-image-input" type="file" accept="image/jpeg,image/png,image/heic,image/heif,.heic,.heif" hidden />
     <script src="frontend/stores.js?v=2"></script>
     <script src="frontend/api-client.js"></script>
     <script src="frontend/public-config.js"></script>
+    <script src="frontend/image-preparation.js"></script>
     <script src="frontend/adapters.js"></script>
     <script src="frontend/job-poller.js"></script>
     <script src="app.js"></script>

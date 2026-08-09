@@ -1008,15 +1008,12 @@ function merchantQuestions(candidate) {
   return (state.followupQuestions || []).filter(item => item.candidate_id === candidate.serverCandidateId).map(item => ({ id: item.id, question: item.question_text, reason: item.reason }));
 }
 
-function validateImageFiles(files, remaining) {
-  const list = Array.from(files || []);
-  if (!list.length) return [];
-  if (list.length > remaining) { showToast(`最多可添加 ${remaining} 张图片`); return []; }
-  for (const file of list) {
-    if (!publicLimits().allowedImageMimeTypes.includes(file.type)) { showToast('仅支持 JPEG 或 PNG 图片'); return []; }
-    if (file.size > publicLimits().maxImageBytes) { showToast(`单张图片不能超过 ${Math.floor(publicLimits().maxImageBytes / 1024 / 1024)}MB`); return []; }
-  }
-  return list;
+async function prepareImageFiles(files, remaining) {
+  return GuanchaImagePreparation.prepareFiles(files, {
+    remaining,
+    allowedImageMimeTypes: publicLimits().allowedImageMimeTypes,
+    maxImageBytes: publicLimits().maxImageBytes,
+  });
 }
 function createSquarePreview(file) {
   return new Promise((resolve) => {
@@ -1054,9 +1051,9 @@ async function stageImages(files) {
   }));
 }
 async function addCandidate(files) {
-  if (state.candidates.length >= candidateLimit()) return showToast(`最多添加 ${candidateLimit()} 款候选茶`);
-  const validFiles = validateImageFiles(files, imageLimit());
-  if (!validFiles.length) return;
+  if (state.candidates.length >= candidateLimit()) return { ok: false, code: 'candidate_limit_exceeded', message: `最多添加 ${candidateLimit()} 款候选茶` };
+  const prepared = await prepareImageFiles(files, imageLimit());
+  if (!prepared.ok) return prepared;
   const index = state.candidates.length;
   const defaults = {
     name: `候选茶 ${String.fromCharCode(65 + index)}`,
@@ -1064,17 +1061,23 @@ async function addCandidate(files) {
     fields: '商品信息',
     art: ART.can,
   };
-  state.candidates.push({ id: `local-candidate-${Date.now()}-${index}`, letter: String.fromCharCode(65 + index), images: await stageImages(validFiles), extractionStatus: 'queued', ...defaults });
-  state.activeCandidate = state.candidates.length - 1;
-  state.decisionVersionId = null;
-  saveState();
+  try {
+    const candidate = { id: `local-candidate-${Date.now()}-${index}`, letter: String.fromCharCode(65 + index), images: await stageImages(prepared.files), extractionStatus: 'queued', ...defaults };
+    state.candidates.push(candidate);
+    state.activeCandidate = state.candidates.length - 1;
+    state.decisionVersionId = null;
+    saveState();
+    return { ok: true, candidate, converted: prepared.converted };
+  } catch {
+    return { ok: false, code: 'local_image_stage_failed', message: '图片暂存失败，请重试' };
+  }
 }
 async function appendCandidateImage(candidateId, files) {
   const candidate = state.candidates.find((item) => item.id === candidateId);
   if (!candidate) return showToast('候选茶不存在，请刷新后重试');
-  const validFiles = validateImageFiles(files, imageLimit() - candidate.images.length);
-  if (!validFiles.length) return;
-  candidate.images.push(...await stageImages(validFiles));
+  const prepared = await prepareImageFiles(files, imageLimit() - candidate.images.length);
+  if (!prepared.ok) return showToast(prepared.message);
+  candidate.images.push(...await stageImages(prepared.files));
   candidate.extractionStatus = 'queued';
   state.decisionVersionId = null;
   saveState(); render();
@@ -1138,7 +1141,8 @@ function captureCamera() {
     if (!blob) return showToast('拍摄失败，请重试');
     stopCamera();
     state.overlay = null;
-    await addCandidate([new File([blob], 'camera.jpg', { type: 'image/jpeg' })]);
+    const added = await addCandidate([new File([blob], 'camera.jpg', { type: 'image/jpeg' })]);
+    if (!added.ok) return showToast(added.message);
     setScreen('candidates');
     showToast('候选图片已暂存，尚未调用识别');
   }, 'image/jpeg', .9);
@@ -1263,8 +1267,14 @@ document.addEventListener('input', event => {
   document.querySelectorAll('.sweet-labels span').forEach((label,index)=>label.classList.toggle('active', index * 25 === state.o2.sweetness));
 });
 document.addEventListener('change', event => { if (event.target.matches('[data-action="sweetness"]')) saveState(); });
-albumInput.addEventListener('change', async event => { if (event.target.files?.length) { await addCandidate(event.target.files); setScreen('candidates'); showToast('候选图片已暂存，尚未调用识别'); } event.target.value=''; });
-cameraInput.addEventListener('change', async event => { if (event.target.files?.length) { await addCandidate(event.target.files); setScreen('candidates'); showToast('候选图片已暂存，尚未调用识别'); } event.target.value=''; });
+async function addCandidateFromInput(files) {
+  const added = await addCandidate(files);
+  if (!added.ok) return showToast(added.message);
+  setScreen('candidates');
+  showToast('候选图片已暂存，尚未调用识别');
+}
+albumInput.addEventListener('change', async event => { if (event.target.files?.length) await addCandidateFromInput(event.target.files); event.target.value=''; });
+cameraInput.addEventListener('change', async event => { if (event.target.files?.length) await addCandidateFromInput(event.target.files); event.target.value=''; });
 candidateImageInput.addEventListener('change', async event => { if (pendingImageCandidateId && event.target.files?.length) await appendCandidateImage(pendingImageCandidateId, event.target.files); pendingImageCandidateId=null; event.target.value=''; });
 function addSelectionHistory(candidate) {
   if (!candidate) return;
