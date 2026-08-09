@@ -80,6 +80,6 @@ test('candidate-input success toast is gated on an explicit addCandidate result'
   const app = fs.readFileSync(path.resolve(root, '..', 'app.js'), 'utf8');
   const page = fs.readFileSync(path.resolve(root, '..', 'index.html'), 'utf8');
   assert.match(app, /return \{ ok: true, candidate, converted: prepared\.converted \}/);
-  assert.match(app, /const added = await addCandidate\(files\);\s*if \(!added\.ok\) return showToast\(added\.message\);\s*setScreen\('candidates'\);\s*showToast\('候选图片已暂存，尚未调用识别'\);/);
+  assert.match(app, /const added = await addCandidate\(files\);\s*if \(!added\.ok\) return showToast\(added\.message\);\s*setScreen\('candidates'\);\s*showToast\('候选图片已加入比较，等待整理商品信息'\);/);
   assert.match(page, /accept="image\/jpeg,image\/png,image\/heic,image\/heif,.heic,.heif"/);
 });
