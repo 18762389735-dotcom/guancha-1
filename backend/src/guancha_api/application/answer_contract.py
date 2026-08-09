@@ -13,11 +13,31 @@ FIELD_LABELS = {
     "origin": "产地", "roast_or_style": "香型或焙火", "price": "价格",
     "weight": "净含量", "weight_grams": "净含量", "season": "采摘季节",
     "sample_available": "是否可试饮", "return_policy": "退换说明",
+    "tea_type": "茶类", "origin_text": "产地", "aroma_style": "香型",
+    "roast_level": "焙火程度", "process_text": "加工工艺",
+    "year_or_batch": "年份或批次",
+}
+
+_UNCERTAINTY_EXPLANATIONS = {
+    "price": "需要核对是否落在本次预算内。",
+    "weight": "需要结合净含量判断价格是否合适。",
+    "weight_grams": "需要结合净含量判断价格是否合适。",
+    "sample_available": "是否可试饮会影响送礼前的试错成本。",
+    "roast_level": "焙火程度会影响香气与入口风格，和本次口味需求直接相关。",
+    "aroma_style": "香型会影响和“清爽花香”等口味需求的匹配程度。",
+    "origin": "若在意产区，需要先核对具体产地。",
+    "origin_text": "若在意产区，需要先核对具体产地。",
+    "year_or_batch": "年份或批次会影响对新茶与风格的判断。",
+    "return_policy": "退换说明会影响购买后的风险。",
 }
 
 
 def _label(field: str) -> str:
     return FIELD_LABELS.get(field, "商品信息")
+
+
+def _why_it_matters(field: str) -> str:
+    return _UNCERTAINTY_EXPLANATIONS.get(field, "这项信息可能影响本次比较，补充后再决定会更稳妥。")
 
 
 def _action(bucket: str, is_top: bool) -> str:
@@ -45,7 +65,14 @@ def build_selection_answer(*, version: dict[str, object], decisions: list[dict[s
             if any(item["label"] == _label(field) for item in facts):
                 continue
             facts.append({"label": _label(field), "value": str(evidence["normalized_value"]), "basis": "商品页明确标注" if evidence["information_status"] == "explicit" else "根据页面内容推测"})
-        unknowns = [{"label": _label(str(field)), "why_it_matters": "这项信息可能影响本次比较", "change_if": "补充后可能改变当前结论"} for field in decision["missing_critical_fields"][:3]]
+        unknowns = [
+            {
+                "label": _label(str(field)),
+                "why_it_matters": _why_it_matters(str(field)),
+                "change_if": "补充后可能改变当前结论",
+            }
+            for field in decision["missing_critical_fields"][:3]
+        ]
         question = question_by_candidate.get(decision["candidate_id"])
         items.append({
             "candidate_id": decision["candidate_id"], "position": decision["overall_order"],

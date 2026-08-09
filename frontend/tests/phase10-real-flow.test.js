@@ -122,3 +122,13 @@ test('production frontend contains no provider key or evaluation fixture leakage
   assert.doesNotMatch(sources, /(?:MIMO|OPENAI)_API_KEY|VITE_MIMO_API_KEY/i);
   assert.doesNotMatch(sources, /(?:EVAL-|HOLDOUT-|PERSONA-|META-|golden|corrected_value|expected_bucket|expected_rank|blind-holdout|decision-eval)/i);
 });
+
+test('result view presents extracted facts before open questions and hides provenance implementation copy', () => {
+  const source = fs.readFileSync(path.resolve(root, '..', 'app.js'), 'utf8');
+  const facts = source.indexOf('<h3>已经识别到的信息</h3>');
+  const unknowns = source.indexOf('<h3>仍待确认</h3>');
+  const reasons = source.indexOf('<h3>为什么需要确认</h3>');
+  const fit = source.indexOf('<h3>与你的需求有什么关系</h3>');
+  assert.ok(facts >= 0 && facts < unknowns && unknowns < reasons && reasons < fit);
+  assert.doesNotMatch(source, /\$\{escapeHtml\(item\.value\)\}<small>\$\{escapeHtml\(item\.basis\)\}<\/small>/);
+});
