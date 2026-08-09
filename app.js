@@ -53,6 +53,8 @@ const defaultState = {
   reply: '',
   history: [],
   sourceFor: null,
+  activeSelectionFlow: false,
+  preferenceFlow: null,
   ownershipChoice: 'bought',
   warehouse: [
     { id: 'spring', name: '春日乌龙', type: '乌龙茶', aroma: '清香型', status: 'drinking', source: '选茶结果', lastBrew: '今天', records: 1, art: 'can', facts: ['轻火焙制', '2026 年春茶', '支持 10g 试饮装'], risks: ['具体产地仍待确认'] },
@@ -66,6 +68,41 @@ const defaultState = {
   ],
 };
 
+function storedObject(key) {
+  try {
+    const value = JSON.parse(localStorage.getItem(key) || 'null');
+    return value && typeof value === 'object' ? value : null;
+  } catch { return null; }
+}
+function savedPreferenceSnapshot() {
+  const ui = storedObject(GuanchaStores.uiSession.key);
+  const legacy = storedObject('guancha-prototype-v2');
+  return { ...legacy, ...ui };
+}
+function onboardingStatus() {
+  return GuanchaOnboarding.resolveStatus(localStorage, savedPreferenceSnapshot());
+}
+function routeAfterHomeStart() {
+  state.activeSelectionFlow = true;
+  if (onboardingStatus() === 'not_started') {
+    state.preferenceFlow = 'onboarding';
+    return setScreen('o1');
+  }
+  state.preferenceFlow = null;
+  return setScreen('candidates');
+}
+function completeSelectionFlow() {
+  state.activeSelectionFlow = false;
+  state.preferenceFlow = null;
+}
+function applyInitialRoute(next) {
+  next.screen = GuanchaOnboarding.initialScreen({
+    reload: GuanchaOnboarding.isReload(window.performance),
+    state: next,
+  });
+  next.overlay = null;
+  return next;
+}
 function loadState() {
   const uiFallback = { screen: defaultState.screen, overlay: null, openDrink: defaultState.openDrink, activeCandidate: 0, o1: defaultState.o1, o2: defaultState.o2, ownershipChoice: defaultState.ownershipChoice, brew: null, journalDate: null, activeRecordId: null };
   const selectionFallback = { sessionId: null, candidates: [], reply: '', need: defaultState.need, decisionVersionId: null, decisionJobId: null, decisionStatus: 'not_requested', selectionAnswer: null, followupQuestions: [], questionStatus: 'idle', merchantReplyIds: {}, merchantReplies: {}, rejudgeJobId: null, lastDecisionDelta: null, deltaStatus: 'idle', jobIds: {} };
@@ -74,12 +111,12 @@ function loadState() {
   const bridge = GuanchaStores.selectionBridge.load(selectionFallback);
   const postPurchase = GuanchaStores.localPostPurchase.load(postPurchaseFallback);
   if (localStorage.getItem(GuanchaStores.selectionBridge.key) || localStorage.getItem(GuanchaStores.localPostPurchase.key)) {
-    return normalizeState({ ...structuredClone(defaultState), ...ui, ...bridge, ...postPurchase, overlay: null, sourceFor: null });
+    return applyInitialRoute(normalizeState({ ...structuredClone(defaultState), ...ui, ...bridge, ...postPurchase, overlay: null, sourceFor: null }));
   }
   try {
     const saved = GuanchaStores.legacy.load();
-    return normalizeState(saved ? { ...structuredClone(defaultState), ...saved, overlay: null, sourceFor: null } : structuredClone(defaultState));
-  } catch { return structuredClone(defaultState); }
+    return applyInitialRoute(normalizeState(saved ? { ...structuredClone(defaultState), ...saved, overlay: null, sourceFor: null } : structuredClone(defaultState)));
+  } catch { return applyInitialRoute(structuredClone(defaultState)); }
 }
 function normalizeCandidate(candidate, index) {
   const legacyImageCount = Array.isArray(candidate.images) ? candidate.images.length : Number(candidate.images) || 0;
@@ -103,6 +140,10 @@ function normalizeCandidate(candidate, index) {
 }
 function normalizeState(value) {
   const next = { ...value };
+  if (typeof next.activeSelectionFlow !== 'boolean') {
+    if (['home', 'warehouse', 'warehouse-detail', 'journal', 'settings'].includes(next.screen)) next.activeSelectionFlow = false;
+    else delete next.activeSelectionFlow;
+  }
   next.candidates = (Array.isArray(next.candidates) ? next.candidates : []).slice(0, candidateLimit()).map(normalizeCandidate);
   if (['analysis', 'result', 'rejudge'].includes(next.screen)) next.screen = 'candidates';
   return next;
@@ -138,7 +179,7 @@ function candidateLimit() { return Math.min(PRODUCT_LIMITS.maxCandidates, public
 function imageLimit() { return Math.min(PRODUCT_LIMITS.maxImagesPerCandidate, publicLimits().maxImagesPerCandidate); }
 
 function saveState() {
-  GuanchaStores.uiSession.save({ screen: state.screen, overlay: null, openDrink: state.openDrink || '', activeCandidate: state.activeCandidate, o1: state.o1, o2: state.o2, ownershipChoice: state.ownershipChoice, brew: state.brew, journalDate: state.journalDate || null, activeRecordId: state.activeRecordId || null });
+  GuanchaStores.uiSession.save({ screen: state.screen, overlay: null, openDrink: state.openDrink || '', activeCandidate: state.activeCandidate, o1: state.o1, o2: state.o2, ownershipChoice: state.ownershipChoice, brew: state.brew, journalDate: state.journalDate || null, activeRecordId: state.activeRecordId || null, activeSelectionFlow: state.activeSelectionFlow === true, preferenceFlow: state.preferenceFlow || null });
   GuanchaStores.selectionBridge.save({ sessionId: state.sessionId || null, candidates: state.candidates, reply: state.reply || '', need: state.need, decisionVersionId: state.decisionVersionId || null, decisionJobId: state.decisionJobId || null, decisionStatus: state.decisionStatus || 'not_requested', selectionAnswer: state.selectionAnswer || null, followupQuestions: state.followupQuestions || [], questionStatus: state.questionStatus || 'idle', merchantReplyIds: state.merchantReplyIds || {}, merchantReplies: state.merchantReplies || {}, rejudgeJobId: state.rejudgeJobId || null, lastDecisionDelta: state.lastDecisionDelta || null, deltaStatus: state.deltaStatus || 'idle', jobIds: state.jobIds || {} });
   GuanchaStores.localPostPurchase.save({ warehouse: state.warehouse, journalRecords: state.journalRecords, history: state.history, selectedTeaId: state.selectedTeaId || null });
 }
@@ -799,7 +840,7 @@ function candidateRow(candidate, index) {
 }
 
 function renderO1() {
-  return `<section class="page preference-page"><button class="icon-btn back-btn" data-action="go-home" aria-label="返回">${icon('back')}</button><div class="progress-mark"><span class="active"></span><span></span></div><h1>你平时喜欢喝什么？</h1><p class="lead">不用懂茶，从你熟悉的饮品开始，让观茶先了解你喜欢什么感觉。</p><div class="preference-categories">${Object.entries(DRINKS).map(([key, info]) => drinkGroup(key, info)).join('')}</div><div class="preference-footer"><button class="primary-btn" data-action="go-o2">下一步</button><button class="skip" data-action="go-home">暂时跳过，稍后再设置</button></div></section>`;
+  return `<section class="page preference-page"><button class="icon-btn back-btn" data-action="go-home" aria-label="返回">${icon('back')}</button><div class="progress-mark"><span class="active"></span><span></span></div><h1>你平时喜欢喝什么？</h1><p class="lead">不用懂茶，从你熟悉的饮品开始，让观茶先了解你喜欢什么感觉。</p><div class="preference-categories">${Object.entries(DRINKS).map(([key, info]) => drinkGroup(key, info)).join('')}</div><div class="preference-footer"><button class="primary-btn" data-action="go-o2">下一步</button><button class="skip" data-action="skip-preferences">暂时跳过，稍后再设置</button></div></section>`;
 }
 function drinkGroup(key, info) {
   const isOpen = state.openDrink === key;
@@ -1156,6 +1197,7 @@ async function addCandidate(files) {
   try {
     const candidate = { id: `local-candidate-${Date.now()}-${index}`, letter: String.fromCharCode(65 + index), images: await stageImages(prepared.files), extractionStatus: 'queued', ...defaults };
     state.candidates.push(candidate);
+    state.activeSelectionFlow = true;
     state.activeCandidate = state.candidates.length - 1;
     state.decisionVersionId = null;
     saveState();
@@ -1170,6 +1212,7 @@ async function appendCandidateImage(candidateId, files) {
   const prepared = await prepareImageFiles(files, imageLimit() - candidate.images.length);
   if (!prepared.ok) return showToast(prepared.message);
   candidate.images.push(...await stageImages(prepared.files));
+  state.activeSelectionFlow = true;
   candidate.extractionStatus = 'queued';
   state.decisionVersionId = null;
   saveState(); render();
@@ -1256,11 +1299,24 @@ document.addEventListener('click', event => {
   const target = event.target.closest('[data-action]'); if (!target) return;
   const action = target.dataset.action;
   if (action === 'go-home') return setScreen('home');
-  if (action === 'start-task') return setScreen('candidates');
-  if (action === 'open-preferences') return setScreen('o1');
+  if (action === 'start-task') return routeAfterHomeStart();
+  if (action === 'open-preferences') { state.preferenceFlow = 'edit'; return setScreen('o1'); }
   if (action === 'go-o1') return setScreen('o1');
   if (action === 'go-o2') return setScreen('o2');
-  if (action === 'finish-preferences') { showToast(hasAnyO1() ? '已记作口味参考，选茶时会优先以你这次的需求为准。' : '可随时在设置中补充偏好'); return setScreen('home'); }
+  if (action === 'skip-preferences') {
+    GuanchaOnboarding.markStatus(localStorage, 'skipped');
+    const next = state.preferenceFlow === 'onboarding' ? 'candidates' : 'home';
+    state.preferenceFlow = null;
+    showToast('已跳过口味设置，本次需求仍优先');
+    return setScreen(next);
+  }
+  if (action === 'finish-preferences') {
+    GuanchaOnboarding.markStatus(localStorage, 'completed');
+    const next = state.preferenceFlow === 'onboarding' ? 'candidates' : 'home';
+    state.preferenceFlow = null;
+    showToast(hasAnyO1() ? '已记作口味参考，选茶时会优先以你这次的需求为准。' : '已保存设置，本次需求仍优先');
+    return setScreen(next);
+  }
   if (action === 'tab') { const tab = target.dataset.tab; const screens = { select:'home', journal:'journal', warehouse:'warehouse', settings:'settings' }; return setScreen(screens[tab] || 'home'); }
   if (action === 'toggle-drink') { state.openDrink = state.openDrink === target.dataset.key ? '' : target.dataset.key; saveState(); render(); return; }
   if (action === 'toggle-drink-option') { const { key, value } = target.dataset; const items = state.o1[key]; state.o1[key] = items.includes(value) ? items.filter(item => item !== value) : [...items, value]; saveState(); render(); return; }
@@ -1306,9 +1362,10 @@ document.addEventListener('click', event => {
     }
     state.selectedTeaId = (existing || state.warehouse[0]).id;
     addSelectionHistory(candidate);
+    completeSelectionFlow();
     showToast('已加入茶仓库'); return setScreen('warehouse');
   }
-  if (action === 'save-choice-only') { addSelectionHistory(currentCandidate()); showToast('已保存选茶结果'); return setScreen('home'); }
+  if (action === 'save-choice-only') { addSelectionHistory(currentCandidate()); completeSelectionFlow(); showToast('已保存选茶结果'); return setScreen('home'); }
   if (action === 'go-warehouse') return setScreen('warehouse');
   if (action === 'open-warehouse-add') return setScreen('warehouse-add');
   if (action === 'open-tea') { state.selectedTeaId=target.dataset.id; return setScreen('warehouse-detail'); }
