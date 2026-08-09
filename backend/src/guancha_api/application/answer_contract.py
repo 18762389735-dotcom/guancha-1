@@ -10,25 +10,13 @@ from uuid import UUID
 
 FIELD_LABELS = {
     "product_name": "商品名称", "tea_category": "茶类", "tea_subtype": "具体茶类",
-    "origin": "产地", "roast_or_style": "香型或焙火", "price": "价格",
+    "tea_type": "茶类", "origin": "产地", "origin_text": "具体产地",
+    "roast_or_style": "页面标注的香型或焙火方向", "aroma_style": "具体香型",
+    "roast_level": "具体焙火程度", "price": "实际到手价格",
+    "aroma_claims": "页面香气描述", "taste_claims": "页面滋味描述",
     "weight": "净含量", "weight_grams": "净含量", "season": "采摘季节",
-    "sample_available": "是否可试饮", "return_policy": "退换说明",
-    "tea_type": "茶类", "origin_text": "产地", "aroma_style": "香型",
-    "roast_level": "焙火程度", "process_text": "加工工艺",
-    "year_or_batch": "年份或批次",
-}
-
-_UNCERTAINTY_EXPLANATIONS = {
-    "price": "需要核对是否落在本次预算内。",
-    "weight": "需要结合净含量判断价格是否合适。",
-    "weight_grams": "需要结合净含量判断价格是否合适。",
-    "sample_available": "是否可试饮会影响送礼前的试错成本。",
-    "roast_level": "焙火程度会影响香气与入口风格，和本次口味需求直接相关。",
-    "aroma_style": "香型会影响和“清爽花香”等口味需求的匹配程度。",
-    "origin": "若在意产区，需要先核对具体产地。",
-    "origin_text": "若在意产区，需要先核对具体产地。",
-    "year_or_batch": "年份或批次会影响对新茶与风格的判断。",
-    "return_policy": "退换说明会影响购买后的风险。",
+    "year_or_batch": "年份或批次", "process_text": "制作工艺说明",
+    "sample_available": "是否可试饮", "return_policy": "试饮或退换规则",
 }
 
 
@@ -101,8 +89,47 @@ def _label(field: str) -> str:
     return FIELD_LABELS.get(field, "商品信息")
 
 
-def _why_it_matters(field: str) -> str:
-    return _UNCERTAINTY_EXPLANATIONS.get(field, "这项信息可能影响本次比较，补充后再决定会更稳妥。")
+def _display_value(field: str, value: object) -> str:
+    """Keep internal normalized enums out of the user-facing answer."""
+    text = str(value)
+    if field == "roast_level":
+        return {"light": "轻火", "medium": "中火", "heavy": "足火"}.get(text, text)
+    if field == "sample_available":
+        return {"true": "提供小样或试饮", "false": "暂不提供小样或试饮"}.get(text.lower(), text)
+    return text
+
+
+def _decision_uncertainty(field: str, evidence: list[dict[str, object]]) -> dict[str, str]:
+    """Explain a decision-critical unknown without promoting an ambiguous fact.
+
+    ``roast_or_style`` is a legacy page field: a value such as “清香型” is a
+    useful page clue, but it does not reliably say whether the seller means a
+    specific aroma style or a roast description.  Keep that distinction plain
+    for the user instead of asking a seemingly duplicate question.
+    """
+    has_legacy_style = any(
+        item.get("field_name") == "roast_or_style"
+        and item.get("information_status") in {"explicit", "inferred"}
+        and item.get("normalized_value") not in (None, "", "unknown")
+        for item in evidence
+    )
+    if field == "aroma_style" and has_legacy_style:
+        return {
+            "label": "页面已有香型/焙火描述，仍需确认具体香型",
+            "why_it_matters": "页面的合并描述还不能区分具体香型与焙火程度。",
+            "change_if": "确认具体香型后，才能更可靠地判断是否接近你这次想要的风味方向。",
+        }
+    if field == "roast_level" and has_legacy_style:
+        return {
+            "label": "页面已有香型/焙火描述，仍需确认具体焙火程度",
+            "why_it_matters": "页面的合并描述还不能说明火味和熟香会处于什么程度。",
+            "change_if": "确认焙火程度后，才能更可靠地判断是否符合你这次的口感方向。",
+        }
+    return {
+        "label": _label(field),
+        "why_it_matters": "这项信息可能影响本次比较。",
+        "change_if": "补充后可能改变当前结论。",
+    }
 
 
 def _action(bucket: str, is_top: bool) -> str:
@@ -123,28 +150,25 @@ def build_selection_answer(*, version: dict[str, object], decisions: list[dict[s
     for decision in decisions:
         candidate = candidate_by_id[decision["candidate_id"]]
         facts = []
+        merchant_facts = []
         for evidence in candidate["evidence"]:
             if evidence["information_status"] not in {"explicit", "inferred"} or evidence["normalized_value"] in (None, ""):
                 continue
             field = str(evidence["field_name"])
             if any(item["label"] == _label(field) for item in facts):
                 continue
-            facts.append({"label": _label(field), "value": str(evidence["normalized_value"]), "basis": "商品页明确标注" if evidence["information_status"] == "explicit" else "根据页面内容推测"})
-        unknowns = [
-            {
-                "label": _label(str(field)),
-                "why_it_matters": _why_it_matters(str(field)),
-                "change_if": "补充后可能改变当前结论",
-            }
-            for field in decision["missing_critical_fields"][:3]
-        ]
+            fact = {"label": _label(field), "value": _display_value(field, evidence["normalized_value"]), "basis": "商品页明确标注" if evidence["information_status"] == "explicit" else "根据页面内容推测"}
+            facts.append(fact)
+            if evidence.get("source_type") == "merchant-claim":
+                merchant_facts.append({**fact, "basis": "商家回复声明，尚未实物核验"})
+        unknowns = [_decision_uncertainty(str(field), candidate["evidence"]) for field in decision["missing_critical_fields"][:3]]
         question = question_by_candidate.get(decision["candidate_id"])
         sensory = build_sensory_interpretations(candidate["evidence"])
         items.append({
             "candidate_id": decision["candidate_id"], "position": decision["overall_order"],
             "display_name": candidate["display_name"] or candidate["display_label"] or f"候选茶 {decision['overall_order']}",
             "verdict": _action(str(decision["action_bucket"]), decision["candidate_id"] == version["top_candidate_id"]),
-            "why_it_fits": list(decision["reasons"])[:3], "known_facts": facts[:5],
+            "why_it_fits": list(decision["reasons"])[:3], "known_facts": facts[:5], "merchant_facts": merchant_facts[:3],
             "decision_uncertainties": unknowns, "risks": list(decision["risk_flags"])[:3],
             "sensory_interpretations": [
                 {"label": hint["label"], "text": hint["interpretation"], "boundary": hint["boundary"]}

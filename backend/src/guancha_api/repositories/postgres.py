@@ -750,6 +750,24 @@ class PostgresPhase2Repository:
                     (decision["extraction_version_id"],),
                 )
                 candidate["evidence"] = list(await cursor.fetchall())
+                # A rejudge creates a new immutable DecisionVersion rather than
+                # rewriting the screenshot ExtractionVersion.  The answer read
+                # model must therefore append only the parsed merchant claims
+                # that were the parent version's auditable inputs; otherwise a
+                # completed rejudge looks identical to the first judgment.
+                parent_version_id = version["parent_decision_version_id"] or version["id"]
+                await cursor.execute(
+                    """select m.field_key as field_name,m.normalized_value,m.information_status,
+                              m.source_type,m.verification_status,m.evidence_strength
+                       from merchant_claims m
+                       join merchant_replies r on r.id=m.merchant_reply_id
+                      where r.decision_version_id=%s and r.candidate_id=%s
+                        and r.status='parsed' and r.processing_status='completed'
+                        and m.normalized_value is not null
+                      order by m.created_at""",
+                    (parent_version_id, decision["candidate_id"]),
+                )
+                candidate["evidence"].extend(await cursor.fetchall())
                 candidates.append(candidate)
             await cursor.execute(
                 """select id,candidate_id,field_key,question_text from followup_questions

@@ -11,6 +11,11 @@ from guancha_api.repositories.postgres import PostgresPhase2Repository, Question
 from guancha_api.schemas.contracts import FollowupQuestion
 
 
+def _question_text(field_key: str) -> str:
+    label = merchant_field_label(field_key)
+    return f"请问这款茶{label}？" if label.startswith("是否") else f"请问这款茶的{label}是什么？"
+
+
 class QuestionGenerationService:
     def __init__(self, repository: PostgresPhase2Repository, provider: ReasoningProvider | None = None) -> None:
         self.repository = repository
@@ -77,7 +82,7 @@ class QuestionGenerationService:
                 if value < config.minimum_value_score:
                     continue
                 affected = _affected(impacts)
-                candidate = ReasoningCandidate(item["candidate_id"], field_key, f"请问这款茶的{merchant_field_label(field_key)}是什么？", _reason(affected), affected, branches, max_impact, value, {"max_impact_level": max_impact, "user_relevance": relevance, "uncertainty": uncertainty, "answerability": answerability, "duplicate_penalty": duplicate_penalty, "interaction_cost": interaction_cost, "value_score": value})
+                candidate = ReasoningCandidate(item["candidate_id"], field_key, _question_text(field_key), _reason(affected), affected, branches, max_impact, value, {"max_impact_level": max_impact, "user_relevance": relevance, "uncertainty": uncertainty, "answerability": answerability, "duplicate_penalty": duplicate_penalty, "interaction_cost": interaction_cost, "value_score": value})
                 drafts.append((candidate, max_impact, relevance, answerability, interaction_cost))
         drafts.sort(key=lambda value: (-value[1], -value[2], -value[3], value[4], str(value[0].candidate_id), value[0].field_key))
         return [item[0] for item in drafts]

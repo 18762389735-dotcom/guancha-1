@@ -44,6 +44,28 @@ class FakeMerchantReplyReasoningProvider:
             'origin_text': [('安溪', 'anxi'), ('感德', 'gande'), ('西坪', 'xiping'), ('祥华', 'xianghua')],
             'tea_subtype': [('铁观音', 'tieguanyin'), ('黄金桂', 'huangjingui'), ('本山', 'benshan')],
         }
+        if field_key == 'roast_level':
+            # The merchant is answering a roast-specific question, so short
+            # answers such as “浅” and “深” have an unambiguous local meaning.
+            # Normalize only this closed vocabulary; free-form descriptions
+            # remain unresolved instead of becoming invented evidence.
+            roast_shortcuts = {
+                '浅': '轻火', '浅焙': '轻火', '轻焙': '轻火', '低焙': '轻火',
+                '深': '足火', '深焙': '足火', '重焙': '足火', '重火': '足火',
+                '中焙': '中火',
+            }
+            raw_text = roast_shortcuts.get(raw_text.strip(), raw_text)
+            if raw_text == raw_text.strip():
+                if any(token in raw_text for token in ('\u8f7b', '\u6d45')):
+                    raw_text = '\u8f7b\u706b'
+                elif any(token in raw_text for token in ('\u6df1', '\u91cd', '\u6d53')):
+                    raw_text = '\u8db3\u706b'
+                elif '\u4e2d' in raw_text:
+                    raw_text = '\u4e2d\u706b'
+        elif field_key == 'sample_available' and any(token in raw_text for token in ('\u63d0\u4f9b', '\u652f\u6301', '\u6709')):
+            # This parser is only called while answering a sample-specific
+            # question, so these short confirmations are unambiguous here.
+            raw_text = '\u53ef\u8bd5\u996e'
         if field_key in {'price', 'weight_grams', 'year_or_batch', 'process_text'}:
             import re
             patterns = {

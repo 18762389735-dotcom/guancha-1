@@ -12,7 +12,7 @@ import pytest
 
 from guancha_api.domain.tieguanyin.decision import evaluate_candidate, rank_within_buckets
 from guancha_api.domain.tieguanyin.rules import load_approved_rules
-from guancha_api.application.question_service import QuestionGenerationService
+from guancha_api.application.question_service import QuestionGenerationService, _question_text
 from guancha_api.schemas.contracts import ActionBucket
 
 
@@ -112,6 +112,16 @@ def test_unknown_status_with_a_value_is_not_treated_as_known() -> None:
     assert unknown_value.score_components["evidence_sufficiency"] < known.score_components["evidence_sufficiency"]
 
 
+def test_explicit_legacy_tea_and_style_fields_satisfy_only_the_matching_core_fields() -> None:
+    draft = _draft(evidence=_evidence(
+        tea_subtype="铁观音", tea_category="乌龙茶", roast_or_style="清香型", season="spring",
+    ))
+    assert "tea_type" not in draft.missing_critical_fields
+    assert "aroma_style" not in draft.missing_critical_fields
+    # 清香型 is a style direction, never a fabricated roast-level fact.
+    assert "roast_level" in draft.missing_critical_fields
+
+
 def test_m7_conflict_never_improves_risk_or_bucket() -> None:
     plain = _draft(evidence=_evidence(**FULL))
     conflict = _draft(evidence=_evidence(**FULL) + [{"field_name": "season", "normalized_value": "autumn", "information_status": "conflict"}])
@@ -178,3 +188,7 @@ def test_questions_only_offer_unknown_or_decision_relevant_fields() -> None:
     assert candidates
     assert all(item.field_key not in {"tea_type", "aroma_style", "season"} for item in candidates)
     assert all(item.field_key in {"roast_level", "price", "sample_available", "return_policy", "origin_text", "year_or_batch", "weight_grams", "process_text"} for item in candidates)
+
+
+def test_boolean_merchant_questions_do_not_use_a_double_question_form() -> None:
+    assert _question_text("sample_available") == "请问这款茶是否提供小样或试饮装？"

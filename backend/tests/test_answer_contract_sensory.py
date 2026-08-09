@@ -1,4 +1,7 @@
-from guancha_api.application.answer_contract import build_sensory_interpretations
+import asyncio
+
+from guancha_api.application.answer_contract import _decision_uncertainty, build_sensory_interpretations
+from guancha_api.providers.merchant_reply import FakeMerchantReplyReasoningProvider
 
 
 def _evidence(field: str, value: object, *, status: str = "explicit") -> dict[str, object]:
@@ -35,3 +38,23 @@ def test_marketing_or_unknown_never_becomes_verified_taste() -> None:
     assert "有明显兰花香" not in marketing[0]["interpretation"]
     assert build_sensory_interpretations([_evidence("aroma_style", "qingxiang", status="unknown")]) == []
     assert build_sensory_interpretations([_evidence("season", "spring")]) == []
+
+
+def test_legacy_style_hint_does_not_make_the_aroma_question_look_duplicate() -> None:
+    uncertainty = _decision_uncertainty("aroma_style", [_evidence("roast_or_style", "清香型")])
+    assert uncertainty["label"] == "页面已有香型/焙火描述，仍需确认具体香型"
+    assert "不能区分具体香型与焙火程度" in uncertainty["why_it_matters"]
+    assert "风味方向" in uncertainty["change_if"]
+
+
+def test_known_decision_fields_have_specific_labels() -> None:
+    uncertainty = _decision_uncertainty("price", [])
+    assert uncertainty["label"] == "实际到手价格"
+
+
+def test_short_merchant_roast_answers_use_a_closed_mapping() -> None:
+    provider = FakeMerchantReplyReasoningProvider()
+    light = asyncio.run(provider.parse_merchant_reply(field_key="roast_level", raw_text="浅", product_evidence=()))
+    heavy = asyncio.run(provider.parse_merchant_reply(field_key="roast_level", raw_text="深", product_evidence=()))
+    assert light.claims[0]["normalized_value"] == "light"
+    assert heavy.claims[0]["normalized_value"] == "heavy"

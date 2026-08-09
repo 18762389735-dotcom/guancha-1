@@ -4,6 +4,7 @@ const albumInput = document.querySelector('#album-input');
 const cameraInput = document.querySelector('#camera-input');
 const candidateImageInput = document.querySelector('#candidate-image-input');
 let activeCameraStream = null;
+let lastRenderedScreen = null;
 
 const STORAGE_KEY = 'guancha-prototype-v2';
 const DRINKS = {
@@ -43,6 +44,7 @@ const PRODUCT_LIMITS = Object.freeze({ maxCandidates: 5, maxImagesPerCandidate: 
 const defaultState = {
   screen: 'home',
   overlay: null,
+  openDrink: 'tea',
   o1: { tea: ['绿茶', '花香茶', '乌龙茶', '红茶'], coffee: [], milk: [], juice: [] },
   o2: { sweetness: 75, flavors: ['茉莉花', '兰花'] },
   need: { taste: '清爽花香', purpose: '送礼', budget: '150–300 元' },
@@ -65,8 +67,8 @@ const defaultState = {
 };
 
 function loadState() {
-  const uiFallback = { screen: defaultState.screen, overlay: null, activeCandidate: 0, o1: defaultState.o1, o2: defaultState.o2, ownershipChoice: defaultState.ownershipChoice, brew: null, journalDate: null, activeRecordId: null };
-  const selectionFallback = { sessionId: null, candidates: [], reply: '', need: defaultState.need, decisionVersionId: null, decisionJobId: null, decisionStatus: 'not_requested', selectionAnswer: null, followupQuestions: [], questionStatus: 'idle', merchantReplyIds: {}, rejudgeJobId: null, lastDecisionDelta: null, deltaStatus: 'idle', jobIds: {} };
+  const uiFallback = { screen: defaultState.screen, overlay: null, openDrink: defaultState.openDrink, activeCandidate: 0, o1: defaultState.o1, o2: defaultState.o2, ownershipChoice: defaultState.ownershipChoice, brew: null, journalDate: null, activeRecordId: null };
+  const selectionFallback = { sessionId: null, candidates: [], reply: '', need: defaultState.need, decisionVersionId: null, decisionJobId: null, decisionStatus: 'not_requested', selectionAnswer: null, followupQuestions: [], questionStatus: 'idle', merchantReplyIds: {}, merchantReplies: {}, rejudgeJobId: null, lastDecisionDelta: null, deltaStatus: 'idle', jobIds: {} };
   const postPurchaseFallback = { warehouse: defaultState.warehouse, journalRecords: defaultState.journalRecords, history: [], selectedTeaId: null };
   const ui = GuanchaStores.uiSession.load(uiFallback);
   const bridge = GuanchaStores.selectionBridge.load(selectionFallback);
@@ -92,7 +94,7 @@ function normalizeCandidate(candidate, index) {
     // Before extraction, names in the original prototype were decorative
     // examples.  Keep the card truthful until the provider supplies a result.
     name: hasServerResult ? candidate.name : `候选茶 ${letter}`,
-    type: hasServerResult ? candidate.type : '商品信息待识别',
+    type: hasServerResult ? candidate.type : '商品信息整理中',
     extraction: hasServerResult ? candidate.extraction : null,
     extractionVersionId: hasServerResult ? candidate.extractionVersionId : null,
     decision: hasServerResult ? candidate.decision || null : null,
@@ -117,7 +119,7 @@ function renumberCandidates() {
     candidate.letter = letter;
     if (candidate.extractionStatus !== 'completed') {
       candidate.name = `候选茶 ${letter}`;
-      candidate.type = '商品信息待识别';
+      candidate.type = '商品信息整理中';
     }
   });
 }
@@ -136,8 +138,8 @@ function candidateLimit() { return Math.min(PRODUCT_LIMITS.maxCandidates, public
 function imageLimit() { return Math.min(PRODUCT_LIMITS.maxImagesPerCandidate, publicLimits().maxImagesPerCandidate); }
 
 function saveState() {
-  GuanchaStores.uiSession.save({ screen: state.screen, overlay: null, activeCandidate: state.activeCandidate, o1: state.o1, o2: state.o2, ownershipChoice: state.ownershipChoice, brew: state.brew, journalDate: state.journalDate || null, activeRecordId: state.activeRecordId || null });
-  GuanchaStores.selectionBridge.save({ sessionId: state.sessionId || null, candidates: state.candidates, reply: state.reply || '', need: state.need, decisionVersionId: state.decisionVersionId || null, decisionJobId: state.decisionJobId || null, decisionStatus: state.decisionStatus || 'not_requested', selectionAnswer: state.selectionAnswer || null, followupQuestions: state.followupQuestions || [], questionStatus: state.questionStatus || 'idle', merchantReplyIds: state.merchantReplyIds || {}, rejudgeJobId: state.rejudgeJobId || null, lastDecisionDelta: state.lastDecisionDelta || null, deltaStatus: state.deltaStatus || 'idle', jobIds: state.jobIds || {} });
+  GuanchaStores.uiSession.save({ screen: state.screen, overlay: null, openDrink: state.openDrink || '', activeCandidate: state.activeCandidate, o1: state.o1, o2: state.o2, ownershipChoice: state.ownershipChoice, brew: state.brew, journalDate: state.journalDate || null, activeRecordId: state.activeRecordId || null });
+  GuanchaStores.selectionBridge.save({ sessionId: state.sessionId || null, candidates: state.candidates, reply: state.reply || '', need: state.need, decisionVersionId: state.decisionVersionId || null, decisionJobId: state.decisionJobId || null, decisionStatus: state.decisionStatus || 'not_requested', selectionAnswer: state.selectionAnswer || null, followupQuestions: state.followupQuestions || [], questionStatus: state.questionStatus || 'idle', merchantReplyIds: state.merchantReplyIds || {}, merchantReplies: state.merchantReplies || {}, rejudgeJobId: state.rejudgeJobId || null, lastDecisionDelta: state.lastDecisionDelta || null, deltaStatus: state.deltaStatus || 'idle', jobIds: state.jobIds || {} });
   GuanchaStores.localPostPurchase.save({ warehouse: state.warehouse, journalRecords: state.journalRecords, history: state.history, selectedTeaId: state.selectedTeaId || null });
 }
 function apiNeed() {
@@ -368,7 +370,7 @@ async function resumeLiveBackendState() {
     const pendingLocal = state.candidates.filter(candidate => !candidate.serverCandidateId && (candidate.images || []).some(image => image.localOnly));
     state.candidates = snapshot.candidates.map((remote, index) => ({
       letter: remote.display_label || String.fromCharCode(65 + index), name: remote.display_name || `候选茶 ${remote.display_label || index + 1}`,
-      type: '商品信息待识别', fields: '', serverCandidateId: remote.id,
+      type: '商品信息整理中', fields: '', serverCandidateId: remote.id,
       images: (remote.images || []).map(image => ({ id: `server-${image.id}`, serverImageId: image.id, status: image.status, localOnly: false })),
       serverImageId: remote.images?.at(-1)?.id || null, jobId: remote.images?.at(-1)?.current_job_id || null,
       extractionStatus: remote.current_extraction?.status || remote.images?.at(-1)?.status || 'queued', extraction: null,
@@ -379,6 +381,7 @@ async function resumeLiveBackendState() {
     // caches presentation state and must not decide aggregate readiness.
     state.followupQuestions = snapshot.questions || [];
     state.merchantReplyIds = Object.fromEntries((snapshot.merchant_replies || []).map(reply => [reply.followup_question_id, reply.id]));
+    state.merchantReplies = Object.fromEntries((snapshot.merchant_replies || []).map(reply => [reply.followup_question_id, reply]));
     state.lastDecisionDelta = snapshot.decision_delta || null;
     state.rejudgeJobId = ['queued', 'processing'].includes(snapshot.rejudge_job?.status) ? snapshot.rejudge_job.id : null;
     if (state.rejudgeJobId) state.questionStatus = 'rejudging';
@@ -398,16 +401,25 @@ async function resumeLiveBackendState() {
       try { applyExtraction(candidate, await apiClient.getCurrentExtraction(candidate.serverCandidateId)); } catch { candidate.extractionStatus = 'failed'; candidate.jobError = 'result_unavailable'; }
     }
   }
-  if (state.decisionJobId) {
-    state.decisionStatus = 'loading';
-    startDecisionPolling(state.decisionJobId);
-  } else if (state.decisionVersionId && !state.candidates.some(candidate => candidate.decision)) {
+  // A completed server Decision is authoritative.  A browser refresh can
+  // otherwise retain an obsolete job id and keep the user on “分析中” even
+  // though the result has already been persisted.
+  if (state.decisionVersionId) {
+    state.decisionJobId = null;
     try {
       const decision = await apiClient.getCurrentDecision(state.sessionId);
       applySessionDecision(decision);
       await refreshSelectionAnswer();
       state.decisionStatus = 'ready';
+      // A refresh has no reliable visual history: normalizeState deliberately
+      // returns transient screens to candidates.  Once the server confirms a
+      // current Decision, resume the useful destination instead of presenting
+      // an already-completed selection as if it still needs analysis.
+      if (state.screen === 'analysis' || state.screen === 'candidates') state.screen = 'result';
     } catch { state.decisionStatus = 'failed'; }
+  } else if (state.decisionJobId) {
+    state.decisionStatus = 'loading';
+    startDecisionPolling(state.decisionJobId);
   }
   if (state.rejudgeJobId) startRejudgePolling(state.rejudgeJobId);
   saveState(); render();
@@ -416,6 +428,10 @@ function fitLabel(candidate, answerCandidate) {
   const bucket = candidate?.decision?.action_bucket;
   if (bucket === 'not-recommended-now') return '目前不优先考虑';
   if (bucket === 'insufficient-information') return '目前还看不清实际风格';
+  // A server order can be driven by evidence sufficiency or trial cost.  It
+  // must not be presented as a taste win when the explicit need found no
+  // positive match for either candidate.
+  if (Number(candidate?.decision?.score_components?.need_match || 0) <= 0) return '口味方向暂未分出高下';
   if (Number(candidate?.decision?.overall_order) === 1) return '当前更接近你的方向';
   if ((answerCandidate?.sensory_interpretations || []).length) return '更偏另一种风格';
   return answerCandidate?.verdict || '目前还需要更多线索';
@@ -480,8 +496,25 @@ async function openFollowupQuestions() {
     state.followupQuestions = []; saveState(); render();
   }
 }
+function replyNeedsClarification(reply) {
+  return ['partially-answered', 'evasive', 'not-answered', 'conflicting'].includes(reply?.parse_status);
+}
+function replyGuidance(question) {
+  const answer = String(question?.reply?.raw_text || '').trim();
+  const quoted = answer ? `“${answer}”` : '这条回复';
+  if (question?.fieldKey === 'roast_level') {
+    return `商家回复${quoted}，但未能确认具体焙火等级。请追问：这款是轻火、 中火还是足火？`;
+  }
+  if (question?.fieldKey === 'sample_available') {
+    return `商家回复${quoted}，但仍无法确认是否能购买或领取试饮小样。请追问：是否提供小样 / 试饮装？`;
+  }
+  if (question?.fieldKey === 'season') {
+    return `商家回复${quoted}，但未能确认具体采摘季节。请追问：这是春茶、秋茶，还是其他批次？`;
+  }
+  return `商家回复${quoted}，但还不足以确认“${question?.fieldLabel || '这项信息'}”。请让商家直接说明这项信息。`;
+}
 async function submitMerchantReply(rawText) {
-  const questions = (state.followupQuestions || []).filter(item => item.candidate_id === currentCandidate()?.serverCandidateId && !state.merchantReplyIds?.[item.id]);
+  const questions = (state.followupQuestions || []).filter(item => item.candidate_id === currentCandidate()?.serverCandidateId && (!state.merchantReplyIds?.[item.id] || replyNeedsClarification(state.merchantReplies?.[item.id])));
   const question = questions[0];
   if (!question || !state.sessionId || !state.decisionVersionId || !apiClient.isConfigured) return showToast('请先生成当前问题');
   try {
@@ -490,12 +523,15 @@ async function submitMerchantReply(rawText) {
       decision_version_id: state.decisionVersionId, followup_question_id: question.id, raw_text: rawText,
     });
     state.merchantReplyIds = state.merchantReplyIds || {};
+    state.merchantReplies = state.merchantReplies || {};
     state.merchantReplyIds[question.id] = reply.id;
+    state.merchantReplies[question.id] = reply;
     for (const extraQuestion of questions.slice(1)) {
       const extraReply = await apiClient.createMerchantReply(state.sessionId, {
         decision_version_id: state.decisionVersionId, followup_question_id: extraQuestion.id, raw_text: rawText,
       });
       state.merchantReplyIds[extraQuestion.id] = extraReply.id;
+      state.merchantReplies[extraQuestion.id] = extraReply;
     }
     const requiredQuestionIds = new Set((state.followupQuestions || []).map(item => item.id));
     state.questionStatus = [...requiredQuestionIds].every(id => state.merchantReplyIds[id]) ? 'ready' : 'completed';
@@ -613,6 +649,12 @@ function currentCandidate() { return state.candidates[state.activeCandidate] || 
 function isRejudged() { return state.screen === 'rejudge'; }
 
 function render() {
+  // Most interactions re-render the current screen so that selected states
+  // are reflected immediately. Keep the scroll position of that same screen;
+  // navigation still starts at the top because the screen name changes.
+  const previousPage = app.querySelector('.page');
+  const previousScrollTop = previousPage?.scrollTop || 0;
+  const preserveScroll = lastRenderedScreen === state.screen;
   const templates = {
     home: renderHome,
     candidates: renderCandidates,
@@ -639,6 +681,13 @@ function render() {
     stub: renderStub,
   };
   app.innerHTML = (templates[state.screen] || renderHome)() + renderOverlay();
+  lastRenderedScreen = state.screen;
+  if (preserveScroll && previousScrollTop > 0) {
+    requestAnimationFrame(() => {
+      const page = app.querySelector('.page');
+      if (page) page.scrollTop = previousScrollTop;
+    });
+  }
   if (state.overlay === 'ask' && ['completed', 'ready'].includes(state.questionStatus) && merchantQuestions(currentCandidate()).length) appendMerchantReplyForm();
   if (state.overlay === 'ask' && state.questionStatus === 'completed') {
     const privacy = app.querySelector('.ask-sheet .privacy');
@@ -753,9 +802,10 @@ function renderO1() {
   return `<section class="page preference-page"><button class="icon-btn back-btn" data-action="go-home" aria-label="返回">${icon('back')}</button><div class="progress-mark"><span class="active"></span><span></span></div><h1>你平时喜欢喝什么？</h1><p class="lead">不用懂茶，从你熟悉的饮品开始，让观茶先了解你喜欢什么感觉。</p><div class="preference-categories">${Object.entries(DRINKS).map(([key, info]) => drinkGroup(key, info)).join('')}</div><div class="preference-footer"><button class="primary-btn" data-action="go-o2">下一步</button><button class="skip" data-action="go-home">暂时跳过，稍后再设置</button></div></section>`;
 }
 function drinkGroup(key, info) {
-  const isOpen = key === 'tea' || (state.o1[key]?.length ?? 0) > 0;
+  const isOpen = state.openDrink === key;
   const count = selectedDrinkCount(key);
-  return `<section class="drink-group"><div class="drink-main"><img class="drink-icon" src="assets/o1-category-icons/${info.icon}" alt="" /><div><div class="drink-main-title">${info.label}</div>${count ? `<div class="drink-count">已选 ${count} 项</div>` : ''}</div>${count ? '<span class="selection-check">✓</span>' : '<span></span>'}<button class="chevron" data-action="toggle-drink" data-key="${key}" aria-label="展开${info.label}">${isOpen ? '⌃' : '⌄'}</button></div>${isOpen ? `<div class="drink-options">${info.options.map(option => `<button class="option-btn ${state.o1[key].includes(option) ? 'selected' : ''}" data-action="toggle-drink-option" data-key="${key}" data-value="${option}">${option}</button>`).join('')}</div>` : ''}</section>`;
+  const toggleLabel = isOpen ? `收起${info.label}` : `展开${info.label}`;
+  return `<section class="drink-group"><div class="drink-main"><img class="drink-icon" src="assets/o1-category-icons/${info.icon}" alt="" /><div><div class="drink-main-title">${info.label}</div>${count ? `<div class="drink-count">已选 ${count} 项</div>` : ''}</div>${count ? '<span class="selection-check">✓</span>' : '<span></span>'}<button class="chevron" data-action="toggle-drink" data-key="${key}" aria-label="${toggleLabel}">${isOpen ? '⌄' : '⌃'}</button></div>${isOpen ? `<div class="drink-options">${info.options.map(option => `<button class="option-btn ${state.o1[key].includes(option) ? 'selected' : ''}" data-action="toggle-drink-option" data-key="${key}" data-value="${option}">${option}</button>`).join('')}</div>` : ''}</section>`;
 }
 function sweetnessLabel(value) { return value === 0 ? '不需要甜感' : value === 25 ? '微微回甜' : value === 50 ? '清甜' : value === 75 ? '明显蜜甜' : '浓郁熟甜'; }
 function renderO2() {
@@ -776,9 +826,10 @@ function appendMerchantReplyForm() {
   const form = document.createElement('form');
   form.className = 'merchant-reply-form'; form.dataset.action = 'submit-merchant-reply';
   const ready = state.questionStatus === 'ready';
-  form.innerHTML = ready
+  const needsClarification = merchantQuestions(currentCandidate()).some(item => replyNeedsClarification(item.reply));
+  form.innerHTML = ready && !needsClarification
     ? '<p class="soft-note">所有需要回复的候选茶已保存。确认后统一更新本轮判断。</p><button class="primary-btn" type="button" data-action="update-merchant-judgement">提交并更新判断</button>'
-    : '<label>商家回复</label><textarea name="merchant-reply" required maxlength="4000" placeholder="粘贴商家对当前问题的回复"></textarea><button class="primary-btn" type="submit">提交商家回复</button>';
+    : `<label>商家回复</label><textarea name="merchant-reply" required maxlength="4000" placeholder="${needsClarification ? '请补充更明确的回答，例如：轻火 / 中火 / 足火' : '粘贴商家对当前问题的回复'}"></textarea><button class="primary-btn" type="submit">${needsClarification ? '补充商家回复' : '提交商家回复'}</button>`;
   sheet.append(form);
 }
 // Archived composition for reference only. It is deliberately not reachable
@@ -829,18 +880,24 @@ function renderDecisionDelta() {
   if (state.deltaStatus === 'denied') return '<section class="result-section"><h3>这次补充对你意味着什么</h3><p class="soft-note">无法读取这次复判的变化说明。</p></section>';
   const delta = state.lastDecisionDelta;
   if (!delta) return '<section class="result-section"><h3>这次补充对你意味着什么</h3><p class="soft-note">本次没有可展示的结构化变化；当前判断保持可见。</p></section>';
-  const changes = [...(delta.added_facts || []), ...(delta.updated_fields || [])].slice(0, 3);
+  const deltaFieldLabel = (value) => ({
+    aroma_style: '香型或焙火方向', roast_level: '焙火程度', price: '到手价格',
+    sample_available: '是否可试饮', season: '采摘季节', origin_text: '产地说明',
+  })[String(value || '')] || '与本次选择有关的商品信息';
+  const changes = [...(delta.added_facts || []), ...(delta.updated_fields || [])]
+    .map(deltaFieldLabel).filter((value, index, values) => values.indexOf(value) === index).slice(0, 3);
   const risks = [
     ...(delta.resolved_risks || []).map(value => `风险下降：${value}`),
     ...(delta.added_risks || []).map(value => `新增风险：${value}`),
   ].slice(0, 3);
-  const unresolved = (delta.unresolved_fields || []).slice(0, 2);
+  const unresolved = (delta.unresolved_fields || []).map(deltaFieldLabel)
+    .filter((value, index, values) => values.indexOf(value) === index).slice(0, 2);
   const unchanged = !changes.length && !risks.length && !unresolved.length && !delta.ranking_changed && !delta.action_tier_changed;
   const parts = [];
-  if (delta.explanation) parts.push(`<p>${escapeHtml(delta.explanation)}</p>`);
+  if (delta.explanation) parts.push('<p>商家补充的信息已合并进本次判断，下面只保留会影响你选择的变化。</p>');
   if (changes.length) parts.push(`<ul>${changes.map(value => `<li>商家补充了：${escapeHtml(value)}</li>`).join('')}</ul>`);
   if (risks.length) parts.push(`<ul>${risks.map(value => `<li>${escapeHtml(value)}</li>`).join('')}</ul>`);
-  if (unresolved.length) parts.push(`<ul>${unresolved.map(value => `<li>仍待确认：${escapeHtml(value)}</li>`).join('')}</ul>`);
+  if (unresolved.length) parts.push(`<p class="soft-note">商家回复已收到，但其中的表述还不足以形成可用事实，因此没有把它当作已确认信息。</p><ul>${unresolved.map(value => `<li>请补充确认：${escapeHtml(value)}</li>`).join('')}</ul>`);
   if (delta.ranking_changed) parts.push('<p class="soft-note">这些新信息改变了候选之间的比较，当前优先选择已更新。</p>');
   else if (delta.action_tier_changed) parts.push('<p class="soft-note">新信息改变了下一步该先试、先问还是可以考虑购买。</p>');
   else if (changes.length || risks.length || unresolved.length) parts.push('<p class="soft-note">补充信息没有改变当前首选，但让这款为什么更接近或偏离本次需求更明确。</p>');
@@ -853,24 +910,33 @@ function renderResult() {
   if (rejudged && !candidate.extraction) data.sections.push(['本次判断变化', renderDecisionDelta()]);
   if (candidate.extraction && !candidate.decision) {
     const decisionFailed = state.decisionStatus === 'failed';
-    return `<section class="analysis-page" aria-live="polite"><h1>${decisionFailed ? '判断未完成' : '正在读取服务端判断'}</h1><p>${decisionFailed ? '服务端判断暂时不可用，可重新发起本次判断。' : '商品信息已提取，等待当前会话的真实判断结果。'}</p>${decisionFailed ? '<button class="primary-btn" data-action="retry-decision">重新判断</button>' : ''}<button class="secondary-btn" data-action="back-from-result">返回候选页</button></section>`;
+    return `<section class="analysis-page" aria-live="polite"><h1>${decisionFailed ? '判断未完成' : '正在生成本次判断'}</h1><p>${decisionFailed ? '服务端判断暂时不可用，可重新发起本次判断。' : '商品信息已整理，正在结合你这次的需求形成判断。'}</p>${decisionFailed ? '<button class="primary-btn" data-action="retry-decision">重新判断</button>' : ''}<button class="secondary-btn" data-action="back-from-result">返回候选页</button></section>`;
   }
   if (candidate.extraction) {
     const answerCandidate = (state.selectionAnswer?.candidates || []).find(item => item.candidate_id === candidate.serverCandidateId);
-    const facts = (answerCandidate?.known_facts || []).map(item => `<li><b>${escapeHtml(item.label)}</b>：${escapeHtml(item.value)}</li>`).join('') || '<li>截图中没有可确认的商品字段。</li>';
+    const facts = (answerCandidate?.known_facts || []).map(item => `<li><b>${escapeHtml(item.label)}</b><span class="evidence-value">${escapeHtml(item.value)}</span><small>${escapeHtml(item.basis)}</small></li>`).join('') || '<li>截图中没有可确认的商品字段。</li>';
+    const merchantFacts = (answerCandidate?.merchant_facts || []).map(item => `<li><b>${escapeHtml(item.label)}</b><span class="evidence-value">${escapeHtml(item.value)}</span><small>${escapeHtml(item.basis)}</small></li>`).join('');
     const risks = (answerCandidate?.risks || candidate.riskFlags || []).map((value) => `<li>${escapeHtml(typeof value === 'string' ? riskForDisplay(value) : value)}</li>`).join('') || '<li>未发现明确风险提示；未出现的信息仍需自行核对。</li>';
     const uncertainties = (answerCandidate?.decision_uncertainties || []).slice(0, 2).map(item => `<li><b>${escapeHtml(item.label)}</b>：${escapeHtml(item.why_it_matters)}<small>${escapeHtml(item.change_if || '补充后可能改变当前选择。')}</small></li>`).join('') || '';
     const decision = mvpDecision(candidate);
     const dots = state.candidates.map((_, index) => `<i class="${index === state.activeCandidate ? 'active' : ''}"></i>`).join('');
-    const askFirst = ['ask-before-buying', 'insufficient-information', 'sample-first'].includes(candidate.decision?.action_bucket);
+    // One comparison has one evidence-completion round.  Before that round the
+    // only primary action is to ask; after the aggregate rejudge every card
+    // offers the same deliberate choice to take that specific tea into the
+    // tea store.  A per-card bucket must not accidentally create two flows.
+    const comparisonSettled = isRejudged()
+      || state.lastDecisionDelta?.new_decision_version_id === state.decisionVersionId;
     const sensory = answerCandidate?.sensory_interpretations || [];
     const preferenceReference = GuanchaAdapters.buildPreferenceReference({ o1: state.o1, o2: state.o2 });
     const personalFit = GuanchaAdapters.buildPersonalFitPresentation({ need: state.need, sensoryInterpretations: sensory, preferenceReference });
     const fitLines = personalFit.lines.map((line) => `<li>${escapeHtml(line)}</li>`).join('');
+    const fitCaveat = Number(candidate.decision?.score_components?.need_match || 0) <= 0
+      ? '<p class="soft-note result-fit-caveat">两款目前都没有足够证据表明更符合你这次的口味方向；当前顺序只比较信息完整度与试错条件，不代表哪款一定更合口味。</p>'
+      : '';
     const sensoryHtml = sensory.slice(0, 2).map((item) => `<li><b>${escapeHtml(item.label)}</b>：${escapeHtml(item.text)}<small>${escapeHtml(item.boundary)}</small></li>`).join('');
     const question = answerCandidate?.next_step;
     const nextStep = question ? `<li><b>最值得问</b>：${escapeHtml(question.text)}<small>这个回答可能改变当前选择。</small></li>` : '';
-    return `<section class="page result-page"><button class="icon-btn back-btn" data-action="back-from-result" aria-label="返回">${icon('back')}</button>${wordmark('analysis-result.svg', 'wordmark--analysis-result', '分析结果')}${needCard({ className: 'result-need' })}<div class="result-stage" id="result-stage"><div class="carousel-meta"><div class="dots">${dots}</div><span>${state.activeCandidate + 1} / ${state.candidates.length}</span></div><article class="result-card card"><div class="priority-label">${escapeHtml(fitLabel(candidate, answerCandidate))}</div><div class="result-scroll"><header class="result-hero">${candidateImageGallery(candidate)}<div><div class="result-name">候选茶 ${candidate.letter} · ${escapeHtml(candidate.name)}</div><div class="result-type">${escapeHtml(candidate.type)}</div></div></header><section class="result-section"><h3>为什么它更像 / 不像你会喜欢</h3><ul>${fitLines}</ul></section>${renderDecisionDelta()}${sensoryHtml ? `<section class="result-section"><h3>这些专业信息可能意味着什么</h3><ul>${sensoryHtml}</ul></section>` : ''}${nextStep || uncertainties ? `<section class="result-section"><h3>现在最值得确认</h3><ul>${nextStep}${uncertainties}</ul></section>` : ''}<section class="result-section"><h3>商品页目前能确认</h3><ul>${facts}</ul></section><section class="result-section"><h3>风险提示</h3><ul>${risks}</ul></section></div></article><p class="result-hint">左右滑动，看看每款茶对你这次选择有什么不同。</p></div><div class="result-actions"><button class="primary-btn" data-action="${askFirst ? 'ask' : 'confirm-choice'}">${askFirst ? '去问商家' : '加入茶仓'}</button>${askFirst ? '<button class="text-link result-secondary-action" data-action="confirm-choice">暂时加入茶仓</button>' : '<button class="text-link result-secondary-action" data-action="ask">还有疑问，去问商家</button>'}</div></section>`;
+    return `<section class="page result-page"><button class="icon-btn back-btn" data-action="back-from-result" aria-label="返回">${icon('back')}</button>${wordmark('analysis-result.svg', 'wordmark--analysis-result', '分析结果')}${needCard({ className: 'result-need' })}<div class="result-stage" id="result-stage"><div class="carousel-meta"><div class="dots">${dots}</div><span>${state.activeCandidate + 1} / ${state.candidates.length}</span></div><article class="result-card card"><div class="priority-label">${escapeHtml(fitLabel(candidate, answerCandidate))}</div><div class="result-scroll"><header class="result-hero">${candidateImageGallery(candidate)}<div><div class="result-name">候选茶 ${candidate.letter} · ${escapeHtml(candidate.name)}</div><div class="result-type">${escapeHtml(candidate.type)}</div></div></header><section class="result-section"><h3>为什么它更像 / 不像你会喜欢</h3>${fitCaveat}<ul>${fitLines}</ul></section>${renderDecisionDelta()}${merchantFacts ? `<section class="result-section evidence-section"><h3>商家本次补充</h3><ul>${merchantFacts}</ul></section>` : ''}${sensoryHtml ? `<section class="result-section"><h3>这些专业信息可能意味着什么</h3><ul>${sensoryHtml}</ul></section>` : ''}${nextStep || uncertainties ? `<section class="result-section"><h3>现在最值得确认</h3><ul>${nextStep}${uncertainties}</ul></section>` : ''}<section class="result-section evidence-section"><h3>商品页目前能确认</h3><ul>${facts}</ul></section><section class="result-section"><h3>风险提示</h3><ul>${risks}</ul></section></div></article><p class="result-hint">左右滑动，或点击两侧露出的卡片，查看每款茶的差异。</p></div><div class="result-actions">${comparisonSettled ? '<button class="primary-btn" data-action="confirm-choice">选择这款，加入茶仓</button><button class="text-link result-secondary-action" data-action="back-from-result">暂不加入，返回候选</button>' : '<button class="primary-btn" data-action="ask">去问商家</button><p class="soft-note result-secondary-action">补齐商家回复后，会统一复判，再决定是否加入茶仓。</p>'}</div></section>`;
   }
   const heading = rejudged
     ? wordmark('updated-judgment.svg', 'wordmark--updated-judgment', '更新后的判断')
@@ -1013,13 +1079,25 @@ function renderOverlay() {
   if (state.overlay === 'plan-editor') { const p=ensureBrew().plan; return `<div class="modal"><form class="modal-box" data-action="save-plan"><h2>调整冲泡参数</h2><div class="form-row"><label>茶具<input name="ware" value="${escapeHtml(p.ware)}" /></label></div><div class="form-row"><label>注水量<input name="water" value="${escapeHtml(p.water)}" /></label></div><div class="form-row"><label>投茶量<input name="grams" value="${escapeHtml(p.grams)}" /></label></div><div class="form-row"><label>水温<input name="temp" value="${escapeHtml(p.temp)}" /></label></div><div class="form-row"><label>第 1 泡秒数<input type="number" min="3" max="60" name="seconds" value="${p.seconds}" /></label></div><div class="modal-actions"><button class="secondary-btn" type="button" data-action="close-overlay">取消</button><button class="primary-btn" style="width:auto;height:44px;padding:0 18px;font-size:16px" type="submit">保存参数</button></div></form></div>`; }
   if (state.overlay === 'ask') {
     const candidate = currentCandidate(); const questions = merchantQuestions(candidate);
-    const body = state.questionStatus === 'loading' ? '<p class="soft-note">正在生成可回答的问题…</p>' : state.questionStatus === 'stale' ? '<p class="soft-note">当前判断已失效，请重新分析后再生成问题。</p>' : state.questionStatus === 'failed' ? '<p class="soft-note">问题生成失败，请重试。</p><button class="primary-btn" data-action="ask">重试生成</button>' : questions.length ? `${questions.map((item,index) => `<article class="question-card"><div class="question-text"><span class="question-no">${index+1}</span>${escapeHtml(item.question)}</div><p class="question-reason">为什么值得问？${escapeHtml(item.reason || '这个回答可能改变当前选择，避免只凭商品页判断。')}</p><button class="copy-btn" data-action="copy-question" data-index="${index}">${icon('copy',16)} 复制</button></article>`).join('')}<button class="copy-all" data-action="copy-all">${icon('copy',20)} 复制全部问题</button><p class="privacy">提交商家回复后，系统会在服务端完成复判并返回变化说明。</p>` : '<p class="soft-note">目前没有值得继续追问的信息。</p>';
+    const unresolvedReply = questions.find(item => replyNeedsClarification(item.reply));
+    const replyNotice = unresolvedReply ? `<p class="soft-note">${escapeHtml(replyGuidance(unresolvedReply))}</p>` : '';
+    const body = state.questionStatus === 'loading' ? '<p class="soft-note">正在生成可回答的问题…</p>' : state.questionStatus === 'stale' ? '<p class="soft-note">当前判断已失效，请重新分析后再生成问题。</p>' : state.questionStatus === 'failed' ? '<p class="soft-note">问题生成失败，请重试。</p><button class="primary-btn" data-action="ask">重试生成</button>' : questions.length ? `${replyNotice}${questions.map((item,index) => `<article class="question-card"><div class="question-text"><span class="question-no">${index+1}</span>${escapeHtml(item.question)}</div><p class="question-reason">为什么值得问？${escapeHtml(item.reason || '这个回答可能改变当前选择，避免只凭商品页判断。')}</p><button class="copy-btn" data-action="copy-question" data-index="${index}">${icon('copy',16)} 复制</button></article>`).join('')}<button class="copy-all" data-action="copy-all">${icon('copy',20)} 复制全部问题</button><p class="privacy">提交商家回复后，系统会在服务端完成复判并返回变化说明。</p>` : '<p class="soft-note">目前没有值得继续追问的信息。</p>';
     return `<div class="overlay"><section class="sheet ask-sheet"><div class="sheet-handle"></div><div class="sheet-title-row">${wordmark('ask-merchant.svg', 'wordmark--ask-merchant', '问商家')}<button class="sheet-close" data-action="close-overlay" aria-label="关闭">${icon('close')}</button></div><p class="ask-target">候选 ${candidate.letter} ・ ${escapeHtml(candidate.name)} <span class="leaf-mark">♧</span></p><p class="ask-tip"><i></i>这不是补字段：它可能改变当前哪款更值得优先考虑。</p>${body}</section></div>`;
   }
   return '';
 }
 function merchantQuestions(candidate) {
-  return (state.followupQuestions || []).filter(item => item.candidate_id === candidate.serverCandidateId).map(item => ({ id: item.id, question: item.question_text, reason: item.reason }));
+  const fieldLabels = { roast_level: '焙火程度', aroma_style: '香型', season: '采摘季节', price: '到手价格', sample_available: '是否可试饮' };
+  return (state.followupQuestions || []).filter(item => item.candidate_id === candidate.serverCandidateId).map(item => ({
+    id: item.id,
+    // Older immutable question records used a double-question form. Present
+    // the same question naturally without mutating its auditable record.
+    question: String(item.question_text || '').replace('请问这款茶的是否提供小样或试饮装是什么？', '请问这款茶是否提供小样或试饮装？'),
+    reason: item.reason,
+    fieldKey: item.field_key,
+    fieldLabel: fieldLabels[item.field_key] || '这项商品信息',
+    reply: state.merchantReplies?.[item.id] || null,
+  }));
 }
 
 async function prepareImageFiles(files, remaining) {
@@ -1071,7 +1149,7 @@ async function addCandidate(files) {
   const index = state.candidates.length;
   const defaults = {
     name: `候选茶 ${String.fromCharCode(65 + index)}`,
-    type: '商品信息待识别',
+    type: '商品信息整理中',
     fields: '商品信息',
     art: ART.can,
   };
@@ -1158,7 +1236,7 @@ function captureCamera() {
     const added = await addCandidate([new File([blob], 'camera.jpg', { type: 'image/jpeg' })]);
     if (!added.ok) return showToast(added.message);
     setScreen('candidates');
-    showToast('候选图片已暂存，尚未调用识别');
+    showToast('候选图片已加入比较，等待整理商品信息');
   }, 'image/jpeg', .9);
 }
 function stopBrewTimer() { if (brewTimerId) { clearInterval(brewTimerId); brewTimerId = null; } }
@@ -1184,7 +1262,7 @@ document.addEventListener('click', event => {
   if (action === 'go-o2') return setScreen('o2');
   if (action === 'finish-preferences') { showToast(hasAnyO1() ? '已记作口味参考，选茶时会优先以你这次的需求为准。' : '可随时在设置中补充偏好'); return setScreen('home'); }
   if (action === 'tab') { const tab = target.dataset.tab; const screens = { select:'home', journal:'journal', warehouse:'warehouse', settings:'settings' }; return setScreen(screens[tab] || 'home'); }
-  if (action === 'toggle-drink') { state.openDrink = state.openDrink === target.dataset.key ? '' : target.dataset.key; render(); return; }
+  if (action === 'toggle-drink') { state.openDrink = state.openDrink === target.dataset.key ? '' : target.dataset.key; saveState(); render(); return; }
   if (action === 'toggle-drink-option') { const { key, value } = target.dataset; const items = state.o1[key]; state.o1[key] = items.includes(value) ? items.filter(item => item !== value) : [...items, value]; saveState(); render(); return; }
   if (action === 'toggle-flavor') { const value = target.dataset.value; const items = state.o2.flavors; state.o2.flavors = items.includes(value) ? items.filter(item => item !== value) : items.length >= 5 ? items : [...items, value]; saveState(); render(); return; }
   if (action === 'open-need-edit') { state.overlay='need-editor'; return render(); }
@@ -1285,7 +1363,7 @@ async function addCandidateFromInput(files) {
   const added = await addCandidate(files);
   if (!added.ok) return showToast(added.message);
   setScreen('candidates');
-  showToast('候选图片已暂存，尚未调用识别');
+  showToast('候选图片已加入比较，等待整理商品信息');
 }
 albumInput.addEventListener('change', async event => { if (event.target.files?.length) await addCandidateFromInput(event.target.files); event.target.value=''; });
 cameraInput.addEventListener('change', async event => { if (event.target.files?.length) await addCandidateFromInput(event.target.files); event.target.value=''; });
@@ -1333,7 +1411,26 @@ async function analyzeBrewRecord(record, tea) {
 }
 function copyText(value) { navigator.clipboard?.writeText(value).then(() => showToast('已复制，可直接发给商家')).catch(() => showToast('复制失败，请手动选择文字')); }
 function slide(direction) { if (state.candidates.length < 2) return showToast('当前只有 1 款候选茶'); state.activeCandidate=(state.activeCandidate+direction+state.candidates.length)%state.candidates.length; render(); }
-function bindResultSwipe() { const stage=document.querySelector('#result-stage'); if (!stage) return; let startX=0, startY=0, startedOnImage=false; stage.addEventListener('pointerdown', e=>{ startX=e.clientX; startY=e.clientY; startedOnImage=Boolean(e.target.closest('.result-image-gallery')); }); stage.addEventListener('pointerup', e=>{ const dx=e.clientX-startX, dy=e.clientY-startY; if (!startedOnImage && Math.abs(dx)>55 && Math.abs(dx)>Math.abs(dy)) slide(dx<0?1:-1); }); }
+function bindResultSwipe() {
+  const stage = document.querySelector('#result-stage');
+  if (!stage) return;
+  let startX = 0, startY = 0, startedOnImage = false;
+  stage.addEventListener('pointerdown', event => {
+    startX = event.clientX; startY = event.clientY;
+    startedOnImage = Boolean(event.target.closest('.result-image-gallery'));
+  });
+  stage.addEventListener('pointerup', event => {
+    const dx = event.clientX - startX, dy = event.clientY - startY;
+    if (startedOnImage || Math.abs(dy) > 18) return;
+    if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy)) return slide(dx < 0 ? 1 : -1);
+    // On desktop the visible white card edges are part of the stage's
+    // decorative pseudo-elements. Treat a click there as a carousel control.
+    if (event.target !== stage) return;
+    const bounds = stage.getBoundingClientRect();
+    if (event.clientX >= bounds.right - 48) return slide(1);
+    if (event.clientX <= bounds.left + 48) return slide(-1);
+  });
+}
 function loadPublicConfig() {
   if (!apiClient.isConfigured) return;
   apiClient.getPublicConfig().then((config) => {

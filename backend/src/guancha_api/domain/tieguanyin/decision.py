@@ -127,6 +127,28 @@ def _evidence_values(evidence: list[dict[str, Any]]) -> dict[str, Any]:
             InformationStatus.INFERRED.value,
         }:
             values[str(field)] = _coerce(value)
+    # The frozen extraction contract predates the decision contract.  A page
+    # can explicitly identify a tea as “铁观音” or “乌龙茶” under the legacy
+    # subtype/category fields; it must count as a known tea type rather than
+    # making the user ask a merchant to repeat the page.  This is a derived
+    # read-time alias only: no Evidence record is rewritten.
+    if "tea_type" not in values:
+        for field in ("tea_subtype", "tea_category"):
+            if values.get(field):
+                values["tea_type"] = values[field]
+                break
+    # 清香型、浓香型与陈香型 are style designations, not roast levels.  The
+    # legacy combined field may therefore satisfy aroma direction, while the
+    # distinct roast_level remains unknown and can still be asked explicitly.
+    if "aroma_style" not in values:
+        legacy_style = str(values.get("roast_or_style") or "").strip().lower()
+        style_aliases = {
+            "qingxiang": "qingxiang", "清香": "qingxiang", "清香型": "qingxiang",
+            "nongxiang": "nongxiang", "浓香": "nongxiang", "浓香型": "nongxiang",
+            "chenxiang": "chenxiang", "陈香": "chenxiang", "陈香型": "chenxiang",
+        }
+        if legacy_style in style_aliases:
+            values["aroma_style"] = style_aliases[legacy_style]
     return values
 
 
