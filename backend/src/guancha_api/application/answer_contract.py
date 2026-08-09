@@ -32,6 +32,71 @@ _UNCERTAINTY_EXPLANATIONS = {
 }
 
 
+def _text_values(value: object) -> list[str]:
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip().lower() for item in value if str(item).strip()]
+    return [item.strip().lower() for item in str(value or "").replace("|", ",").split(",") if item.strip()]
+
+
+def _source_prefix(evidence: dict[str, object]) -> str:
+    return "商家补充的" if evidence.get("source_type") == "merchant-claim" else "商品页的"
+
+
+def build_sensory_interpretations(evidence_items: list[dict[str, object]]) -> list[dict[str, str]]:
+    """Build bounded, traceable presentation hints from explicit evidence only.
+
+    These are general knowledge relations, not claims that the user has already
+    tasted the specific product.  The return shape keeps the evidence field and
+    value available to tests and the presentation mapper, while the user-facing
+    answer below exposes only natural-language labels, text, and boundaries.
+    """
+    hints: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add(item: dict[str, object], *, label: str, text: str, boundary: str, kind: str) -> None:
+        field = str(item.get("field_name") or "")
+        value = str(item.get("normalized_value") or "")
+        key = (field, text)
+        if key in seen or len(hints) >= 3:
+            return
+        seen.add(key)
+        hints.append({
+            "source_field": field,
+            "source_value": value,
+            "label": label,
+            "interpretation": text,
+            "boundary": boundary,
+            "kind": kind,
+        })
+
+    explicit = [
+        item for item in evidence_items
+        if item.get("information_status") == "explicit" and item.get("normalized_value") not in (None, "")
+    ]
+    # Keep the order deterministic and put high-value style signals before
+    # action/marketing explanations.
+    priorities = {"aroma_style": 0, "roast_level": 1, "roast_or_style": 1, "sample_available": 2, "marketing_claims": 3}
+    for item in sorted(explicit, key=lambda row: priorities.get(str(row.get("field_name")), 9)):
+        field = str(item.get("field_name") or "")
+        values = _text_values(item.get("normalized_value"))
+        prefix = _source_prefix(item)
+        if field == "aroma_style":
+            if any(token in value for value in values for token in ("qingxiang", "清香")):
+                add(item, label="清香型线索", text=f"如果{prefix}清香型描述准确，整体风格通常更偏清鲜、轻扬。", boundary="这不代表已验证这款茶一定有某种花香。", kind="sensory")
+            elif any(token in value for value in values for token in ("nongxiang", "浓香")):
+                add(item, label="浓香型线索", text=f"如果{prefix}浓香型描述准确，风格通常更偏熟香、醇厚方向。", boundary="这不代表更高级，也不等于实际浓度已被验证。", kind="sensory")
+        elif field in {"roast_level", "roast_or_style"}:
+            if any(token in value for value in values for token in ("light", "轻焙", "低焙", "轻火")):
+                add(item, label="焙火方向", text="从这种焙火方向看，火味存在感通常较低，更容易保留清鲜方向。", boundary="不代表具体商品已经验证没有火味。", kind="sensory")
+            elif any(token in value for value in values for token in ("medium", "中焙", "足火", "heavy", "重焙", "高焙", "浓焙")):
+                add(item, label="焙火方向", text="从这种焙火方向看，熟香和焙火存在感通常会更明显。", boundary="不代表品质高低，也不等于实际喝感已被验证。", kind="sensory")
+        elif field == "sample_available" and item.get("normalized_value") is True:
+            add(item, label="试饮方式", text="可以先通过小样确认真实香气、入口和火味，试错成本更低。", boundary="小样降低试错成本，不代表一定适合。", kind="action")
+        elif field == "marketing_claims" and any("兰花香" in value for value in values):
+            add(item, label="商品页香气描述", text=f"{prefix}强调兰花香方向，但仅凭页面描述还不能确认实际喝到的香气强度。", boundary="营销描述不能替代真实饮用体验。", kind="marketing-claim")
+    return hints
+
+
 def _label(field: str) -> str:
     return FIELD_LABELS.get(field, "商品信息")
 
@@ -74,12 +139,17 @@ def build_selection_answer(*, version: dict[str, object], decisions: list[dict[s
             for field in decision["missing_critical_fields"][:3]
         ]
         question = question_by_candidate.get(decision["candidate_id"])
+        sensory = build_sensory_interpretations(candidate["evidence"])
         items.append({
             "candidate_id": decision["candidate_id"], "position": decision["overall_order"],
             "display_name": candidate["display_name"] or candidate["display_label"] or f"候选茶 {decision['overall_order']}",
             "verdict": _action(str(decision["action_bucket"]), decision["candidate_id"] == version["top_candidate_id"]),
             "why_it_fits": list(decision["reasons"])[:3], "known_facts": facts[:5],
             "decision_uncertainties": unknowns, "risks": list(decision["risk_flags"])[:3],
+            "sensory_interpretations": [
+                {"label": hint["label"], "text": hint["interpretation"], "boundary": hint["boundary"]}
+                for hint in sensory
+            ],
             "next_step": None if question is None else {"kind": "ask_merchant", "text": question["question_text"], "question_id": question["id"]},
         })
     top = items[0] if items else None

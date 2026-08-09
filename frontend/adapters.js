@@ -21,5 +21,35 @@
       extractionStatus: candidate.extractionStatus || 'empty',
     };
   }
-  global.GuanchaAdapters = { actionLabels, jobToCandidateStatus, candidateToViewModel };
+  function buildPreferenceReference({ o1 = {}, o2 = {} } = {}) {
+    const references = [];
+    const selectedDrinks = Object.values(o1).flat().filter(Boolean).slice(0, 2);
+    if (selectedDrinks.length) {
+      references.push({
+        source: 'o1', source_value: selectedDrinks.join('、'),
+        text: `你在偏好设置中选过${selectedDrinks.join('、')}。`,
+      });
+    }
+    const flavors = Array.isArray(o2.flavors) ? o2.flavors.filter(Boolean).slice(0, 2) : [];
+    if (flavors.length) {
+      references.push({
+        source: 'o2', source_value: flavors.join('、'),
+        text: `你关注的风味里有${flavors.join('、')}。`,
+      });
+    }
+    return references.slice(0, 2);
+  }
+  function buildPersonalFitPresentation({ need = {}, sensoryInterpretations = [], preferenceReference = [] } = {}) {
+    const explicitNeed = [need.taste, need.purpose].filter(Boolean).join('、');
+    const lines = [];
+    if (explicitNeed) lines.push(`这次你明确想找${explicitNeed}，本次判断会优先按这个方向。`);
+    if (sensoryInterpretations.length) {
+      lines.push('这款目前能确认的风格线索，会作为判断它是否接近你这次需求的依据。');
+    } else {
+      lines.push('目前能确认的信息还不足以判断它是否符合你这次的口味方向。');
+    }
+    if (preferenceReference.length) lines.push(`${preferenceReference.map((item) => item.text).join('')}这只作为低置信口味参考，不会覆盖你这次的需求。`);
+    return { lines, preferenceReference };
+  }
+  global.GuanchaAdapters = { actionLabels, jobToCandidateStatus, candidateToViewModel, buildPreferenceReference, buildPersonalFitPresentation };
 }(window));

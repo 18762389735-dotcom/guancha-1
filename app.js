@@ -412,6 +412,14 @@ async function resumeLiveBackendState() {
   if (state.rejudgeJobId) startRejudgePolling(state.rejudgeJobId);
   saveState(); render();
 }
+function fitLabel(candidate, answerCandidate) {
+  const bucket = candidate?.decision?.action_bucket;
+  if (bucket === 'not-recommended-now') return '目前不优先考虑';
+  if (bucket === 'insufficient-information') return '目前还看不清实际风格';
+  if (Number(candidate?.decision?.overall_order) === 1) return '当前更接近你的方向';
+  if ((answerCandidate?.sensory_interpretations || []).length) return '更偏另一种风格';
+  return answerCandidate?.verdict || '目前还需要更多线索';
+}
 async function maybeStartSessionDecision() {
   if (!state.sessionId || state.decisionJobId || !state.candidates.length || !state.candidates.every(candidate => candidate.extractionStatus === 'completed')) return;
   try {
@@ -725,7 +733,7 @@ function needCard({ editable = true, className = '' } = {}) {
 }
 function renderCandidates() {
   const has = state.candidates.length > 0;
-  const list = has ? `<div class="candidate-list">${state.candidates.map((candidate, index) => candidateRow(candidate, index)).join('')}</div><p class="candidate-more">还可添加 ${candidateLimit() - state.candidates.length} 款候选茶</p>` : `<div class="candidate-empty"><span class="candidate-scene" role="img" aria-label="候选茶分析插画"></span><h3>还没有候选茶</h3><p>点击右下角 +，从商品截图开始添加。<br>系统会帮你建立第一款候选茶。</p></div>`;
+  const list = has ? `<div class="candidate-list">${state.candidates.map((candidate, index) => candidateRow(candidate, index)).join('')}</div><p class="candidate-more">还可添加 ${candidateLimit() - state.candidates.length} 款候选茶</p>` : `<div class="candidate-empty"><span class="candidate-scene" role="img" aria-label="候选茶分析插画"></span><h3>还没有候选茶</h3><p>点击右下角 +，把你正在纠结的茶放进来。<br>观茶会帮你看清它们对你有什么不同。</p></div>`;
   return `<section class="page page-tight" aria-label="添加候选"><button class="icon-btn back-btn" data-action="go-home" aria-label="返回">${icon('back')}</button>${wordmark('add-candidate.svg', 'wordmark--add-candidate', '添加候选')}${needCard()}
   <section class="candidate-panel card no-offset"><h2 class="candidate-panel-title">候选茶 <span>(${state.candidates.length}/${candidateLimit()})</span></h2>${list}</section>
   <div class="bottom-actions"><button class="primary-btn" data-action="start-analysis" ${has ? '' : 'disabled'}>开始分析${has ? ` ${state.candidates.length} 款茶` : ''}</button><button class="add-round" data-action="open-source" aria-label="添加候选茶">+</button></div></section>`;
@@ -736,13 +744,13 @@ function candidateRow(candidate, index) {
   const previewUrl = firstImage?.url || images[0]?.previewUrl;
   const visual = previewUrl ? `<img class="candidate-image-thumb" src="${previewUrl}" alt="候选 ${candidate.letter} 已暂存图片" />` : `<span class="candidate-art ref-art ${candidate.letter === 'B' ? 'ref-art--gaiwan' : 'ref-art--can'}" role="img" aria-label="${escapeHtml(candidate.name)}的小插图"></span>`;
   const addImage = images.length < imageLimit() ? `<button class="candidate-image-add" data-action="add-candidate-image" data-candidate-id="${escapeHtml(candidate.id)}" aria-label="为候选${candidate.letter}补第${images.length + 1}张图片">+</button>` : '';
-  const readText = candidate.extractionStatus === 'completed' ? `已读取 ${images.length}/${imageLimit()} 张商品页` : `已暂存 ${images.length}/${imageLimit()} 张图片`;
-  const extractText = candidate.extractionStatus === 'completed' ? `已提取：${escapeHtml(candidate.fields)}` : '等待服务端任务，尚未识别';
+  const readText = candidate.extractionStatus === 'completed' ? `已加入比较 · ${images.length} 张商品截图` : `已暂存 ${images.length}/${imageLimit()} 张商品截图`;
+  const extractText = candidate.extractionStatus === 'completed' ? '已整理商品信息与风格线索' : '等待整理这款茶与你需求有关的差异';
   return `<article class="candidate-row"><span class="candidate-image-slot">${visual}${addImage}</span><div><div class="candidate-name">${escapeHtml(candidate.name)}</div><div class="candidate-type">${escapeHtml(candidate.type)}</div><div class="candidate-read">${readText}</div><div class="candidate-extract">${extractText}</div></div><button class="remove-candidate" data-action="remove-candidate" data-index="${index}" aria-label="删除候选${candidate.letter}">×</button></article>`;
 }
 
 function renderO1() {
-  return `<section class="page preference-page"><button class="icon-btn back-btn" data-action="go-home" aria-label="返回">${icon('back')}</button><div class="progress-mark"><span class="active"></span><span></span></div><h1>你平时喜欢喝什么？</h1><p class="lead">选择你常喝或喜欢的饮品，帮助我们初步了解你的口味。</p><div class="preference-categories">${Object.entries(DRINKS).map(([key, info]) => drinkGroup(key, info)).join('')}</div><div class="preference-footer"><button class="primary-btn" data-action="go-o2">下一步</button><button class="skip" data-action="go-home">暂时跳过，稍后再设置</button></div></section>`;
+  return `<section class="page preference-page"><button class="icon-btn back-btn" data-action="go-home" aria-label="返回">${icon('back')}</button><div class="progress-mark"><span class="active"></span><span></span></div><h1>你平时喜欢喝什么？</h1><p class="lead">不用懂茶，从你熟悉的饮品开始，让观茶先了解你喜欢什么感觉。</p><div class="preference-categories">${Object.entries(DRINKS).map(([key, info]) => drinkGroup(key, info)).join('')}</div><div class="preference-footer"><button class="primary-btn" data-action="go-o2">下一步</button><button class="skip" data-action="go-home">暂时跳过，稍后再设置</button></div></section>`;
 }
 function drinkGroup(key, info) {
   const isOpen = key === 'tea' || (state.o1[key]?.length ?? 0) > 0;
@@ -752,14 +760,14 @@ function drinkGroup(key, info) {
 function sweetnessLabel(value) { return value === 0 ? '不需要甜感' : value === 25 ? '微微回甜' : value === 50 ? '清甜' : value === 75 ? '明显蜜甜' : '浓郁熟甜'; }
 function renderO2() {
   const value = state.o2.sweetness;
-  return `<section class="page preference-page"><button class="icon-btn back-btn" data-action="go-o1" aria-label="返回上一步">${icon('back')}</button><div class="progress-mark"><span></span><span class="active"></span></div><h1>风味与口感</h1><p class="lead">选择你的自然甜感与风味偏好。</p><section class="sweetness-card card"><div class="card-title-row"><span>自然甜感</span><b class="sweet-value">${sweetnessLabel(value)}</b></div><div class="slider-wrap"><input class="sweet-slider" data-action="sweetness" style="--p:${value}%" type="range" min="0" max="100" step="25" value="${value}" aria-label="自然甜感" /><div class="sweet-labels">${[0,25,50,75,100].map(v => `<span class="${v === value ? 'active' : ''}">${sweetnessLabel(v)}</span>`).join('')}</div></div></section><section class="flavor-card card"><div class="card-title-row"><span>风味偏好</span><b class="sweet-value">已选 ${state.o2.flavors.length}/5</b></div><div class="flavor-grid">${FLAVORS.map(flavor => `<button class="flavor-item ${state.o2.flavors.includes(flavor) ? 'selected' : ''}" data-action="toggle-flavor" data-value="${flavor}"><img src="assets/flavors-normalized/${encodeURIComponent(flavor)}.png" alt="" /><span>${flavor}</span></button>`).join('')}</div></section><div class="preference-footer"><button class="primary-btn" data-action="finish-preferences">完成设置</button></div></section>`;
+  return `<section class="page preference-page"><button class="icon-btn back-btn" data-action="go-o1" aria-label="返回上一步">${icon('back')}</button><div class="progress-mark"><span></span><span class="active"></span></div><h1>风味与口感</h1><p class="lead">这些只是口味参考，之后会用来解释哪款茶更接近你。</p><section class="sweetness-card card"><div class="card-title-row"><span>自然甜感</span><b class="sweet-value">${sweetnessLabel(value)}</b></div><div class="slider-wrap"><input class="sweet-slider" data-action="sweetness" style="--p:${value}%" type="range" min="0" max="100" step="25" value="${value}" aria-label="自然甜感" /><div class="sweet-labels">${[0,25,50,75,100].map(v => `<span class="${v === value ? 'active' : ''}">${sweetnessLabel(v)}</span>`).join('')}</div></div></section><section class="flavor-card card"><div class="card-title-row"><span>风味偏好</span><b class="sweet-value">已选 ${state.o2.flavors.length}/5</b></div><div class="flavor-grid">${FLAVORS.map(flavor => `<button class="flavor-item ${state.o2.flavors.includes(flavor) ? 'selected' : ''}" data-action="toggle-flavor" data-value="${flavor}"><img src="assets/flavors-normalized/${encodeURIComponent(flavor)}.png" alt="" /><span>${flavor}</span></button>`).join('')}</div></section><div class="preference-footer"><button class="primary-btn" data-action="finish-preferences">完成设置</button></div></section>`;
 }
 
 function renderAnalysis() {
   const candidate = currentCandidate();
   const failed = candidate?.extractionStatus === 'failed';
   const errorCode = failed && candidate?.jobError ? `<small class="analysis-error-code">错误代码：${escapeHtml(candidate.jobError)}</small>` : '';
-  return `<section class="analysis-page" aria-live="polite"><img src="${asset('AI分析等待插画.svg')}" alt="分析等待插画" /><h1>${failed ? '分析未完成' : '正在分析中'}</h1><p>${failed ? '请检查图片或服务后重新上传分析。' : '正在从商品截图提取可核对的信息。'}</p>${errorCode}${failed ? '<button class="primary-btn" data-action="retry-analysis">重新上传并分析</button>' : '<div class="analysis-dots"><i></i><i></i><i></i></div>'}</section>`;
+  return `<section class="analysis-page" aria-live="polite"><img src="${asset('AI分析等待插画.svg')}" alt="分析等待插画" /><h1>${failed ? '分析未完成' : '正在分析中'}</h1><p>${failed ? '请检查图片或服务后重新上传分析。' : '正在整理这些茶的商品信息、风格线索和与你这次需求有关的差异。'}</p>${errorCode}${failed ? '<button class="primary-btn" data-action="retry-analysis">重新上传并分析</button>' : '<div class="analysis-dots"><i></i><i></i><i></i></div>'}</section>`;
 }
 
 function appendMerchantReplyForm() {
@@ -817,10 +825,10 @@ function resultData(candidate, rejudged) {
 }
 function renderDecisionDelta() {
   if (!isRejudged()) return '';
-  if (state.deltaStatus === 'loading') return '<section class="result-section"><h3>本次判断变化</h3><p class="soft-note">正在读取本次复判的变化说明…</p></section>';
-  if (state.deltaStatus === 'denied') return '<section class="result-section"><h3>本次判断变化</h3><p class="soft-note">无法读取这次复判的变化说明。</p></section>';
+  if (state.deltaStatus === 'loading') return '<section class="result-section"><h3>这次补充对你意味着什么</h3><p class="soft-note">正在读取本次复判的变化说明…</p></section>';
+  if (state.deltaStatus === 'denied') return '<section class="result-section"><h3>这次补充对你意味着什么</h3><p class="soft-note">无法读取这次复判的变化说明。</p></section>';
   const delta = state.lastDecisionDelta;
-  if (!delta) return '<section class="result-section"><h3>本次判断变化</h3><p class="soft-note">本次没有可展示的结构化变化；当前判断保持可见。</p></section>';
+  if (!delta) return '<section class="result-section"><h3>这次补充对你意味着什么</h3><p class="soft-note">本次没有可展示的结构化变化；当前判断保持可见。</p></section>';
   const changes = [...(delta.added_facts || []), ...(delta.updated_fields || [])].slice(0, 3);
   const risks = [
     ...(delta.resolved_risks || []).map(value => `风险下降：${value}`),
@@ -830,14 +838,14 @@ function renderDecisionDelta() {
   const unchanged = !changes.length && !risks.length && !unresolved.length && !delta.ranking_changed && !delta.action_tier_changed;
   const parts = [];
   if (delta.explanation) parts.push(`<p>${escapeHtml(delta.explanation)}</p>`);
-  if (changes.length) parts.push(`<ul>${changes.map(value => `<li>信息更新：${escapeHtml(value)}</li>`).join('')}</ul>`);
+  if (changes.length) parts.push(`<ul>${changes.map(value => `<li>商家补充了：${escapeHtml(value)}</li>`).join('')}</ul>`);
   if (risks.length) parts.push(`<ul>${risks.map(value => `<li>${escapeHtml(value)}</li>`).join('')}</ul>`);
   if (unresolved.length) parts.push(`<ul>${unresolved.map(value => `<li>仍待确认：${escapeHtml(value)}</li>`).join('')}</ul>`);
-  if (delta.ranking_changed) parts.push('<p class="soft-note">候选顺序已按本次复判结果更新。</p>');
-  if (delta.old_top_candidate_id || delta.new_top_candidate_id) parts.push('<p class="soft-note">本次复判已核对优先候选的变化。</p>');
-  if (delta.action_tier_changed) parts.push('<p class="soft-note">行动建议已按本次复判结果更新。</p>');
-  if (unchanged) parts.push('<p class="soft-note">本次补充未改变当前判断。</p>');
-  return `<section class="result-section"><h3>本次判断变化</h3>${parts.join('')}</section>`;
+  if (delta.ranking_changed) parts.push('<p class="soft-note">这些新信息改变了候选之间的比较，当前优先选择已更新。</p>');
+  else if (delta.action_tier_changed) parts.push('<p class="soft-note">新信息改变了下一步该先试、先问还是可以考虑购买。</p>');
+  else if (changes.length || risks.length || unresolved.length) parts.push('<p class="soft-note">补充信息没有改变当前首选，但让这款为什么更接近或偏离本次需求更明确。</p>');
+  if (unchanged) parts.push('<p class="soft-note">本次补充没有改变当前选择，也没有形成足以改变判断的新线索。</p>');
+  return `<section class="result-section"><h3>这次补充对你意味着什么</h3>${parts.join('')}</section>`;
 }
 function renderResult() {
   if (!currentCandidate()) { state.screen = 'candidates'; return renderCandidates(); }
@@ -851,14 +859,18 @@ function renderResult() {
     const answerCandidate = (state.selectionAnswer?.candidates || []).find(item => item.candidate_id === candidate.serverCandidateId);
     const facts = (answerCandidate?.known_facts || []).map(item => `<li><b>${escapeHtml(item.label)}</b>：${escapeHtml(item.value)}</li>`).join('') || '<li>截图中没有可确认的商品字段。</li>';
     const risks = (answerCandidate?.risks || candidate.riskFlags || []).map((value) => `<li>${escapeHtml(typeof value === 'string' ? riskForDisplay(value) : value)}</li>`).join('') || '<li>未发现明确风险提示；未出现的信息仍需自行核对。</li>';
-    const uncertaintyItems = answerCandidate?.decision_uncertainties || [];
-    const uncertainties = uncertaintyItems.map(item => `<li>${escapeHtml(item.label)}</li>`).join('');
-    const uncertaintyReasons = uncertaintyItems.map(item => `<li><b>${escapeHtml(item.label)}</b>：${escapeHtml(item.why_it_matters)}</li>`).join('');
+    const uncertainties = (answerCandidate?.decision_uncertainties || []).slice(0, 2).map(item => `<li><b>${escapeHtml(item.label)}</b>：${escapeHtml(item.why_it_matters)}<small>${escapeHtml(item.change_if || '补充后可能改变当前选择。')}</small></li>`).join('') || '';
     const decision = mvpDecision(candidate);
     const dots = state.candidates.map((_, index) => `<i class="${index === state.activeCandidate ? 'active' : ''}"></i>`).join('');
     const askFirst = ['ask-before-buying', 'insufficient-information', 'sample-first'].includes(candidate.decision?.action_bucket);
-    const reasons = (answerCandidate?.why_it_fits || decision?.reasons || []).map((reason) => `<li>${escapeHtml(reason)}</li>`).join('') || '<li>请结合商品页面信息与自身偏好再做决定。</li>';
-    return `<section class="page result-page"><button class="icon-btn back-btn" data-action="back-from-result" aria-label="返回">${icon('back')}</button>${wordmark('analysis-result.svg', 'wordmark--analysis-result', '分析结果')}${needCard({ className: 'result-need' })}<div class="result-stage" id="result-stage"><div class="carousel-meta"><div class="dots">${dots}</div><span>${state.activeCandidate + 1} / ${state.candidates.length}</span></div><article class="result-card card"><div class="priority-label">${escapeHtml(answerCandidate?.verdict || decision?.action || '信息还不够')}</div><div class="result-scroll"><header class="result-hero">${candidateImageGallery(candidate)}<div><div class="result-name">候选茶 ${candidate.letter} · ${escapeHtml(candidate.name)}</div><div class="result-type">${escapeHtml(candidate.type)}</div></div></header><section class="result-section"><h3>已经识别到的信息</h3><ul>${facts}</ul></section>${uncertainties ? `<section class="result-section"><h3>仍待确认</h3><ul>${uncertainties}</ul></section><section class="result-section"><h3>为什么需要确认</h3><ul>${uncertaintyReasons}</ul></section>` : ''}<section class="result-section"><h3>与你的需求有什么关系</h3><ul>${reasons}</ul></section>${renderDecisionDelta()}<section class="result-section"><h3>风险提示</h3><ul>${risks}</ul></section></div></article><p class="result-hint">左右滑动查看其他候选茶；商品截图也可横向滑动查看。</p></div><div class="result-actions"><button class="primary-btn" data-action="${askFirst ? 'ask' : 'confirm-choice'}">${askFirst ? '去问商家' : '加入茶仓'}</button>${askFirst ? '<button class="text-link result-secondary-action" data-action="confirm-choice">暂时加入茶仓</button>' : '<button class="text-link result-secondary-action" data-action="ask">还有疑问，去问商家</button>'}</div></section>`;
+    const sensory = answerCandidate?.sensory_interpretations || [];
+    const preferenceReference = GuanchaAdapters.buildPreferenceReference({ o1: state.o1, o2: state.o2 });
+    const personalFit = GuanchaAdapters.buildPersonalFitPresentation({ need: state.need, sensoryInterpretations: sensory, preferenceReference });
+    const fitLines = personalFit.lines.map((line) => `<li>${escapeHtml(line)}</li>`).join('');
+    const sensoryHtml = sensory.slice(0, 2).map((item) => `<li><b>${escapeHtml(item.label)}</b>：${escapeHtml(item.text)}<small>${escapeHtml(item.boundary)}</small></li>`).join('');
+    const question = answerCandidate?.next_step;
+    const nextStep = question ? `<li><b>最值得问</b>：${escapeHtml(question.text)}<small>这个回答可能改变当前选择。</small></li>` : '';
+    return `<section class="page result-page"><button class="icon-btn back-btn" data-action="back-from-result" aria-label="返回">${icon('back')}</button>${wordmark('analysis-result.svg', 'wordmark--analysis-result', '分析结果')}${needCard({ className: 'result-need' })}<div class="result-stage" id="result-stage"><div class="carousel-meta"><div class="dots">${dots}</div><span>${state.activeCandidate + 1} / ${state.candidates.length}</span></div><article class="result-card card"><div class="priority-label">${escapeHtml(fitLabel(candidate, answerCandidate))}</div><div class="result-scroll"><header class="result-hero">${candidateImageGallery(candidate)}<div><div class="result-name">候选茶 ${candidate.letter} · ${escapeHtml(candidate.name)}</div><div class="result-type">${escapeHtml(candidate.type)}</div></div></header><section class="result-section"><h3>为什么它更像 / 不像你会喜欢</h3><ul>${fitLines}</ul></section>${renderDecisionDelta()}${sensoryHtml ? `<section class="result-section"><h3>这些专业信息可能意味着什么</h3><ul>${sensoryHtml}</ul></section>` : ''}${nextStep || uncertainties ? `<section class="result-section"><h3>现在最值得确认</h3><ul>${nextStep}${uncertainties}</ul></section>` : ''}<section class="result-section"><h3>商品页目前能确认</h3><ul>${facts}</ul></section><section class="result-section"><h3>风险提示</h3><ul>${risks}</ul></section></div></article><p class="result-hint">左右滑动，看看每款茶对你这次选择有什么不同。</p></div><div class="result-actions"><button class="primary-btn" data-action="${askFirst ? 'ask' : 'confirm-choice'}">${askFirst ? '去问商家' : '加入茶仓'}</button>${askFirst ? '<button class="text-link result-secondary-action" data-action="confirm-choice">暂时加入茶仓</button>' : '<button class="text-link result-secondary-action" data-action="ask">还有疑问，去问商家</button>'}</div></section>`;
   }
   const heading = rejudged
     ? wordmark('updated-judgment.svg', 'wordmark--updated-judgment', '更新后的判断')
@@ -1001,8 +1013,8 @@ function renderOverlay() {
   if (state.overlay === 'plan-editor') { const p=ensureBrew().plan; return `<div class="modal"><form class="modal-box" data-action="save-plan"><h2>调整冲泡参数</h2><div class="form-row"><label>茶具<input name="ware" value="${escapeHtml(p.ware)}" /></label></div><div class="form-row"><label>注水量<input name="water" value="${escapeHtml(p.water)}" /></label></div><div class="form-row"><label>投茶量<input name="grams" value="${escapeHtml(p.grams)}" /></label></div><div class="form-row"><label>水温<input name="temp" value="${escapeHtml(p.temp)}" /></label></div><div class="form-row"><label>第 1 泡秒数<input type="number" min="3" max="60" name="seconds" value="${p.seconds}" /></label></div><div class="modal-actions"><button class="secondary-btn" type="button" data-action="close-overlay">取消</button><button class="primary-btn" style="width:auto;height:44px;padding:0 18px;font-size:16px" type="submit">保存参数</button></div></form></div>`; }
   if (state.overlay === 'ask') {
     const candidate = currentCandidate(); const questions = merchantQuestions(candidate);
-    const body = state.questionStatus === 'loading' ? '<p class="soft-note">正在生成可回答的问题…</p>' : state.questionStatus === 'stale' ? '<p class="soft-note">当前判断已失效，请重新分析后再生成问题。</p>' : state.questionStatus === 'failed' ? '<p class="soft-note">问题生成失败，请重试。</p><button class="primary-btn" data-action="ask">重试生成</button>' : questions.length ? `${questions.map((item,index) => `<article class="question-card"><div class="question-text"><span class="question-no">${index+1}</span>${escapeHtml(item.question)}</div><p class="question-reason">为什么问：${escapeHtml(item.reason)}</p><button class="copy-btn" data-action="copy-question" data-index="${index}">${icon('copy',16)} 复制</button></article>`).join('')}<button class="copy-all" data-action="copy-all">${icon('copy',20)} 复制全部问题</button><p class="privacy">提交商家回复后，系统会在服务端完成复判并返回变化说明。</p>` : '<p class="soft-note">目前没有值得继续追问的信息。</p>';
-    return `<div class="overlay"><section class="sheet ask-sheet"><div class="sheet-handle"></div><div class="sheet-title-row">${wordmark('ask-merchant.svg', 'wordmark--ask-merchant', '问商家')}<button class="sheet-close" data-action="close-overlay" aria-label="关闭">${icon('close')}</button></div><p class="ask-target">候选 ${candidate.letter} ・ ${escapeHtml(candidate.name)} <span class="leaf-mark">♧</span></p><p class="ask-tip"><i></i>这些问题仅用于补足当前判断，不会提交商家回复。</p>${body}</section></div>`;
+    const body = state.questionStatus === 'loading' ? '<p class="soft-note">正在生成可回答的问题…</p>' : state.questionStatus === 'stale' ? '<p class="soft-note">当前判断已失效，请重新分析后再生成问题。</p>' : state.questionStatus === 'failed' ? '<p class="soft-note">问题生成失败，请重试。</p><button class="primary-btn" data-action="ask">重试生成</button>' : questions.length ? `${questions.map((item,index) => `<article class="question-card"><div class="question-text"><span class="question-no">${index+1}</span>${escapeHtml(item.question)}</div><p class="question-reason">为什么值得问？${escapeHtml(item.reason || '这个回答可能改变当前选择，避免只凭商品页判断。')}</p><button class="copy-btn" data-action="copy-question" data-index="${index}">${icon('copy',16)} 复制</button></article>`).join('')}<button class="copy-all" data-action="copy-all">${icon('copy',20)} 复制全部问题</button><p class="privacy">提交商家回复后，系统会在服务端完成复判并返回变化说明。</p>` : '<p class="soft-note">目前没有值得继续追问的信息。</p>';
+    return `<div class="overlay"><section class="sheet ask-sheet"><div class="sheet-handle"></div><div class="sheet-title-row">${wordmark('ask-merchant.svg', 'wordmark--ask-merchant', '问商家')}<button class="sheet-close" data-action="close-overlay" aria-label="关闭">${icon('close')}</button></div><p class="ask-target">候选 ${candidate.letter} ・ ${escapeHtml(candidate.name)} <span class="leaf-mark">♧</span></p><p class="ask-tip"><i></i>这不是补字段：它可能改变当前哪款更值得优先考虑。</p>${body}</section></div>`;
   }
   return '';
 }
@@ -1170,7 +1182,7 @@ document.addEventListener('click', event => {
   if (action === 'open-preferences') return setScreen('o1');
   if (action === 'go-o1') return setScreen('o1');
   if (action === 'go-o2') return setScreen('o2');
-  if (action === 'finish-preferences') { showToast(hasAnyO1() ? '口味偏好已保存' : '可随时在设置中补充偏好'); return setScreen('home'); }
+  if (action === 'finish-preferences') { showToast(hasAnyO1() ? '已记作口味参考，选茶时会优先以你这次的需求为准。' : '可随时在设置中补充偏好'); return setScreen('home'); }
   if (action === 'tab') { const tab = target.dataset.tab; const screens = { select:'home', journal:'journal', warehouse:'warehouse', settings:'settings' }; return setScreen(screens[tab] || 'home'); }
   if (action === 'toggle-drink') { state.openDrink = state.openDrink === target.dataset.key ? '' : target.dataset.key; render(); return; }
   if (action === 'toggle-drink-option') { const { key, value } = target.dataset; const items = state.o1[key]; state.o1[key] = items.includes(value) ? items.filter(item => item !== value) : [...items, value]; saveState(); render(); return; }
