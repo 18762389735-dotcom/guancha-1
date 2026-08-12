@@ -58,3 +58,36 @@ def test_short_merchant_roast_answers_use_a_closed_mapping() -> None:
     heavy = asyncio.run(provider.parse_merchant_reply(field_key="roast_level", raw_text="深", product_evidence=()))
     assert light.claims[0]["normalized_value"] == "light"
     assert heavy.claims[0]["normalized_value"] == "heavy"
+
+
+def test_sample_reply_negation_wins_before_positive_substrings() -> None:
+    provider = FakeMerchantReplyReasoningProvider()
+    for text in ("不提供", "没有", "不可以", "没有小样", "不提供试饮"):
+        parsed = asyncio.run(provider.parse_merchant_reply(field_key="sample_available", raw_text=text, product_evidence=()))
+        assert parsed.reply_status == "answered"
+        assert parsed.claims[0]["normalized_value"] == "false"
+    for text in ("可以", "提供", "有", "有小样", "可试饮"):
+        parsed = asyncio.run(provider.parse_merchant_reply(field_key="sample_available", raw_text=text, product_evidence=()))
+        assert parsed.reply_status == "answered"
+        assert parsed.claims[0]["normalized_value"] == "true"
+
+
+def test_product_unknown_is_not_a_conflict_but_explicit_opposite_is() -> None:
+    provider = FakeMerchantReplyReasoningProvider()
+    unknown_rows = (
+        {"field_name": "sample_available", "normalized_value": None, "information_status": "unknown"},
+        {"field_name": "sample_available", "normalized_value": "", "information_status": "explicit"},
+        {"field_name": "sample_available", "normalized_value": "unknown", "information_status": "explicit"},
+    )
+    unknown = asyncio.run(provider.parse_merchant_reply(field_key="sample_available", raw_text="可以", product_evidence=unknown_rows))
+    same = asyncio.run(provider.parse_merchant_reply(
+        field_key="sample_available", raw_text="可以",
+        product_evidence=({"field_name": "sample_available", "normalized_value": "true", "information_status": "explicit"},),
+    ))
+    opposite = asyncio.run(provider.parse_merchant_reply(
+        field_key="sample_available", raw_text="不提供",
+        product_evidence=({"field_name": "sample_available", "normalized_value": "true", "information_status": "explicit"},),
+    ))
+    assert unknown.reply_status == same.reply_status == "answered"
+    assert opposite.reply_status == "conflicting"
+    assert opposite.conflicts == ("sample_available",)

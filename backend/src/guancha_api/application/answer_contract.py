@@ -152,15 +152,17 @@ def build_selection_answer(*, version: dict[str, object], decisions: list[dict[s
         facts = []
         merchant_facts = []
         for evidence in candidate["evidence"]:
-            if evidence["information_status"] not in {"explicit", "inferred"} or evidence["normalized_value"] in (None, ""):
+            if evidence["information_status"] != "explicit" or evidence["normalized_value"] in (None, ""):
                 continue
             field = str(evidence["field_name"])
-            if any(item["label"] == _label(field) for item in facts):
+            source = evidence.get("source_type") or "product-claim"
+            fact = {"label": _label(field), "value": _display_value(field, evidence["normalized_value"])}
+            if source == "merchant-claim":
+                if not any(item["label"] == fact["label"] for item in merchant_facts):
+                    merchant_facts.append({**fact, "basis": "商家回复声明，尚未实物核验"})
                 continue
-            fact = {"label": _label(field), "value": _display_value(field, evidence["normalized_value"]), "basis": "商品页明确标注" if evidence["information_status"] == "explicit" else "根据页面内容推测"}
-            facts.append(fact)
-            if evidence.get("source_type") == "merchant-claim":
-                merchant_facts.append({**fact, "basis": "商家回复声明，尚未实物核验"})
+            if source == "product-claim" and not any(item["label"] == fact["label"] for item in facts):
+                facts.append({**fact, "basis": "商品页明确标注"})
         unknowns = [_decision_uncertainty(str(field), candidate["evidence"]) for field in decision["missing_critical_fields"][:3]]
         question = question_by_candidate.get(decision["candidate_id"])
         sensory = build_sensory_interpretations(candidate["evidence"])

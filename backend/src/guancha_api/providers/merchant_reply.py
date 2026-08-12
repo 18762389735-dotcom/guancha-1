@@ -39,7 +39,7 @@ class FakeMerchantReplyReasoningProvider:
             'roast_level': [('足火', 'heavy'), ('中火', 'medium'), ('轻火', 'light'), ('浓香', 'heavy'), ('清香', 'light')],
             'aroma_style': [('兰花香', 'orchid'), ('花香', 'floral'), ('清香', 'fresh'), ('浓香', 'roasted')],
             'season': [('春茶', 'spring'), ('秋茶', 'autumn')],
-            'sample_available': [('有小样', 'true'), ('可试饮', 'true'), ('没有小样', 'false'), ('不提供试饮', 'false')],
+            'sample_available': [],
             'return_policy': [('七天无理由', 'seven_day_return'), ('支持退货', 'return_supported'), ('不退不换', 'no_return')],
             'origin_text': [('安溪', 'anxi'), ('感德', 'gande'), ('西坪', 'xiping'), ('祥华', 'xianghua')],
             'tea_subtype': [('铁观音', 'tieguanyin'), ('黄金桂', 'huangjingui'), ('本山', 'benshan')],
@@ -62,10 +62,18 @@ class FakeMerchantReplyReasoningProvider:
                     raw_text = '\u8db3\u706b'
                 elif '\u4e2d' in raw_text:
                     raw_text = '\u4e2d\u706b'
-        elif field_key == 'sample_available' and any(token in raw_text for token in ('\u63d0\u4f9b', '\u652f\u6301', '\u6709')):
-            # This parser is only called while answering a sample-specific
-            # question, so these short confirmations are unambiguous here.
-            raw_text = '\u53ef\u8bd5\u996e'
+        elif field_key == 'sample_available':
+            # Negation must win before broad positive substrings: both
+            # ``没有`` and ``不提供`` contain tokens that would otherwise be
+            # mistaken for a positive answer to this sample-specific question.
+            negative = next((token for token in ('不提供', '没有', '不可以', '不可', '不支持') if token in raw_text), None)
+            positive = next((token for token in ('可以', '可试饮', '提供', '支持', '有') if token in raw_text), None)
+            if negative:
+                matched = (negative, 'false')
+            elif positive:
+                matched = (positive, 'true')
+            else:
+                matched = None
         if field_key in {'price', 'weight_grams', 'year_or_batch', 'process_text'}:
             import re
             patterns = {
@@ -79,9 +87,16 @@ class FakeMerchantReplyReasoningProvider:
                 matched = (found.group(0), found.group(1))
             else:
                 matched = None
-        else:
+        elif field_key != 'sample_available':
             matched = next(((raw, value) for raw, value in values.get(field_key, ()) if raw in raw_text), None)
         if matched is None:
             return MerchantReplyParse('partially-answered', (), (), (field_key,), (), 0, 1, False)
-        conflict = any(row.get('field_name') == field_key and row.get('normalized_value') not in (None, matched[1]) for row in product_evidence)
+        merchant_value = str(matched[1]).strip().lower()
+        conflict = any(
+            row.get('field_name') == field_key
+            and row.get('information_status') == 'explicit'
+            and row.get('normalized_value') not in (None, '', 'unknown')
+            and str(row.get('normalized_value')).strip().lower() != merchant_value
+            for row in product_evidence
+        )
         return MerchantReplyParse('conflicting' if conflict else 'answered', (field_key,), ({'field_key': field_key, 'raw_text': matched[0], 'normalized_value': matched[1]},), () if not conflict else (field_key,), (field_key,) if conflict else (), 1, 0, True)
