@@ -25,6 +25,8 @@ const apiClient = GuanchaApi.createApiClient({
   baseUrl: configuredApiBaseUrl,
   clientId: GuanchaApi.getOrCreateClientId(),
 });
+const productAnalytics = GuanchaProductAnalytics.create({ endpoint: `${configuredApiBaseUrl || ''}/api/v1/events` });
+productAnalytics.track('app_open', { metadata: { screen: 'home' } });
 const runtimeImages = new Map();
 let pendingImageCandidateId = null;
 // A cached older stores.js must never make the upload UI unusable.  Its
@@ -84,8 +86,11 @@ function onboardingStatus() {
 }
 function routeAfterHomeStart() {
   state.activeSelectionFlow = true;
+  productAnalytics.startFlow();
+  productAnalytics.track('start_selection', { metadata: { onboarding_status: onboardingStatus(), screen: 'home' } });
   if (onboardingStatus() === 'not_started') {
     state.preferenceFlow = 'onboarding';
+    productAnalytics.track('onboarding_started', { metadata: { source: 'selection', screen: 'o1' } });
     return setScreen('o1');
   }
   state.preferenceFlow = null;
@@ -94,6 +99,7 @@ function routeAfterHomeStart() {
 function completeSelectionFlow() {
   state.activeSelectionFlow = false;
   state.preferenceFlow = null;
+  productAnalytics.endFlow();
 }
 function applyInitialRoute(next) {
   next.screen = GuanchaOnboarding.initialScreen({
@@ -180,7 +186,8 @@ function imageLimit() { return Math.min(PRODUCT_LIMITS.maxImagesPerCandidate, pu
 
 function saveState() {
   GuanchaStores.uiSession.save({ screen: state.screen, overlay: null, openDrink: state.openDrink || '', activeCandidate: state.activeCandidate, o1: state.o1, o2: state.o2, ownershipChoice: state.ownershipChoice, brew: state.brew, journalDate: state.journalDate || null, activeRecordId: state.activeRecordId || null, activeSelectionFlow: state.activeSelectionFlow === true, preferenceFlow: state.preferenceFlow || null });
-  GuanchaStores.selectionBridge.save({ sessionId: state.sessionId || null, candidates: state.candidates, reply: state.reply || '', need: state.need, decisionVersionId: state.decisionVersionId || null, decisionJobId: state.decisionJobId || null, decisionStatus: state.decisionStatus || 'not_requested', selectionAnswer: state.selectionAnswer || null, followupQuestions: state.followupQuestions || [], questionStatus: state.questionStatus || 'idle', questionDecisionVersionId: state.questionDecisionVersionId || null, merchantReplyIds: state.merchantReplyIds || {}, merchantReplies: state.merchantReplies || {}, rejudgeJobId: state.rejudgeJobId || null, lastDecisionDelta: state.lastDecisionDelta || null, deltaStatus: state.deltaStatus || 'idle', jobIds: state.jobIds || {} });
+  const persistedMerchantReplies = Object.fromEntries(Object.entries(state.merchantReplies || {}).map(([questionId, reply]) => [questionId, Object.fromEntries(['id','selection_session_id','decision_version_id','followup_question_id','candidate_id','status','processing_status','parse_status','created_at','updated_at'].filter(key => reply?.[key] != null).map(key => [key, reply[key]]))]));
+  GuanchaStores.selectionBridge.save({ sessionId: state.sessionId || null, candidates: state.candidates, reply: '', need: state.need, decisionVersionId: state.decisionVersionId || null, decisionJobId: state.decisionJobId || null, decisionStatus: state.decisionStatus || 'not_requested', selectionAnswer: state.selectionAnswer || null, followupQuestions: state.followupQuestions || [], questionStatus: state.questionStatus || 'idle', questionDecisionVersionId: state.questionDecisionVersionId || null, merchantReplyIds: state.merchantReplyIds || {}, merchantReplies: persistedMerchantReplies, rejudgeJobId: state.rejudgeJobId || null, lastDecisionDelta: state.lastDecisionDelta || null, deltaStatus: state.deltaStatus || 'idle', jobIds: state.jobIds || {} });
   GuanchaStores.localPostPurchase.save({ warehouse: state.warehouse, journalRecords: state.journalRecords, history: state.history, selectedTeaId: state.selectedTeaId || null });
 }
 function apiNeed(need = state.need) {
@@ -546,6 +553,7 @@ async function openFollowupQuestions() {
     state.questionStatus = requiredQuestionIds.size === 0
       ? 'not-needed'
       : [...requiredQuestionIds].every(id => state.merchantReplyIds?.[id]) ? 'ready' : 'completed';
+    productAnalytics.track('merchant_question_viewed', { candidate_id: currentCandidate()?.serverCandidateId, decision_version_id: state.decisionVersionId, metadata: { question_count: questions.length, screen: state.screen } });
     saveState(); render();
   } catch (error) {
     state.questionStatus = error.code === 'decision_stale' ? 'stale' : 'failed';
@@ -731,6 +739,13 @@ function render() {
   };
   app.innerHTML = (templates[state.screen] || renderHome)() + renderOverlay();
   lastRenderedScreen = state.screen;
+  if (['result', 'rejudge'].includes(state.screen) && !preserveScroll) {
+    productAnalytics.track('candidate_result_viewed', {
+      candidate_id: currentCandidate()?.serverCandidateId,
+      decision_version_id: state.decisionVersionId || undefined,
+      metadata: { candidate_count: state.candidates.length, screen: state.screen },
+    });
+  }
   if (preserveScroll && previousScrollTop > 0) {
     requestAnimationFrame(() => {
       const page = app.querySelector('.page');
@@ -1323,12 +1338,13 @@ function setScreen(screen) { stopCamera(); state.screen = screen; state.overlay 
 document.addEventListener('click', event => {
   const target = event.target.closest('[data-action]'); if (!target) return;
   const action = target.dataset.action;
-  if (action === 'go-home') return setScreen('home');
+  if (action === 'go-home') { if (state.activeSelectionFlow) productAnalytics.track('flow_abandoned', { stage: state.screen, metadata: { screen: state.screen } }); return setScreen('home'); }
   if (action === 'start-task') return routeAfterHomeStart();
   if (action === 'open-preferences') { state.preferenceFlow = 'edit'; return setScreen('o1'); }
   if (action === 'go-o1') return setScreen('o1');
   if (action === 'go-o2') return setScreen('o2');
   if (action === 'skip-preferences') {
+    productAnalytics.track('onboarding_skipped', { metadata: { source: state.preferenceFlow || 'settings', screen: 'o1' } });
     GuanchaOnboarding.markStatus(localStorage, 'skipped');
     const next = state.preferenceFlow === 'onboarding' ? 'candidates' : 'home';
     state.preferenceFlow = null;
@@ -1336,6 +1352,7 @@ document.addEventListener('click', event => {
     return setScreen(next);
   }
   if (action === 'finish-preferences') {
+    productAnalytics.track('onboarding_completed', { metadata: { source: state.preferenceFlow || 'settings', screen: 'o2' } });
     GuanchaOnboarding.markStatus(localStorage, 'completed');
     const next = state.preferenceFlow === 'onboarding' ? 'candidates' : 'home';
     state.preferenceFlow = null;
@@ -1346,7 +1363,7 @@ document.addEventListener('click', event => {
   if (action === 'toggle-drink') { state.openDrink = state.openDrink === target.dataset.key ? '' : target.dataset.key; saveState(); render(); return; }
   if (action === 'toggle-drink-option') { const { key, value } = target.dataset; const items = state.o1[key]; state.o1[key] = items.includes(value) ? items.filter(item => item !== value) : [...items, value]; saveState(); render(); return; }
   if (action === 'toggle-flavor') { const value = target.dataset.value; const items = state.o2.flavors; state.o2.flavors = items.includes(value) ? items.filter(item => item !== value) : items.length >= 5 ? items : [...items, value]; saveState(); render(); return; }
-  if (action === 'open-need-edit') { state.overlay='need-editor'; return render(); }
+  if (action === 'open-need-edit') { productAnalytics.track('need_started', { metadata: { has_budget: Boolean(state.need?.budget), has_sensory_need: Boolean(state.need?.taste), screen: state.screen } }); state.overlay='need-editor'; return render(); }
   if (action === 'close-overlay') {
     if (target.classList.contains('overlay') && event.target !== target) return;
     stopCamera(); state.overlay=null; return render();
@@ -1362,12 +1379,12 @@ document.addEventListener('click', event => {
   if (action === 'retry-decision') { state.decisionJobId = null; state.decisionStatus = 'not_requested'; saveState(); return maybeStartSessionDecision(); }
   if (action === 'ask') return openFollowupQuestions();
   if (action === 'update-merchant-judgement') return updateMerchantJudgement();
-  if (action === 'copy-question') { const question = merchantQuestions(currentCandidate())[Number(target.dataset.index)]?.question; return question && copyText(question); }
-  if (action === 'copy-all') { return copyText(merchantQuestions(currentCandidate()).map((item,index)=>`${index+1}. ${item.question}`).join('\n')); }
-  if (action === 'slide-prev') return slide(-1);
-  if (action === 'slide-next') return slide(1);
+  if (action === 'copy-question') { const item = merchantQuestions(currentCandidate())[Number(target.dataset.index)]; if (item) productAnalytics.track('merchant_question_copied', { candidate_id: currentCandidate()?.serverCandidateId, decision_version_id: state.decisionVersionId || undefined, metadata: { question_field: item.field_key || 'unknown', question_count: 1, screen: state.screen } }); return item?.question && copyText(item.question); }
+  if (action === 'copy-all') { const questions = merchantQuestions(currentCandidate()); productAnalytics.track('merchant_question_copied', { candidate_id: currentCandidate()?.serverCandidateId, decision_version_id: state.decisionVersionId || undefined, metadata: { question_count: questions.length, action_bucket: 'copy_all', screen: state.screen } }); return copyText(questions.map((item,index)=>`${index+1}. ${item.question}`).join('\n')); }
+  if (action === 'slide-prev') { slide(-1); return productAnalytics.track('candidate_result_viewed', { candidate_id: currentCandidate()?.serverCandidateId, decision_version_id: state.decisionVersionId || undefined, metadata: { candidate_count: state.candidates.length, screen: state.screen } }); }
+  if (action === 'slide-next') { slide(1); return productAnalytics.track('candidate_result_viewed', { candidate_id: currentCandidate()?.serverCandidateId, decision_version_id: state.decisionVersionId || undefined, metadata: { candidate_count: state.candidates.length, screen: state.screen } }); }
   if (action === 'back-from-result') return setScreen('candidates');
-  if (action === 'confirm-choice') return setScreen('ownership');
+  if (action === 'confirm-choice') { productAnalytics.track('candidate_selected', { candidate_id: currentCandidate()?.serverCandidateId, decision_version_id: state.decisionVersionId || undefined, metadata: { action_bucket: currentCandidate()?.decision?.action_bucket || 'unknown', screen: state.screen } }); return setScreen('ownership'); }
   if (action === 'back-from-ownership') return setScreen('candidates');
   if (action === 'set-ownership') { state.ownershipChoice = target.dataset.value; saveState(); return render(); }
   if (action === 'confirm-warehouse') {
@@ -1386,6 +1403,7 @@ document.addEventListener('click', event => {
       });
     }
     state.selectedTeaId = (existing || state.warehouse[0]).id;
+    productAnalytics.track('tea_stock_added', { candidate_id: candidate.serverCandidateId || undefined, decision_version_id: state.decisionVersionId || undefined, metadata: { source: 'selection', screen: 'ownership' } });
     addSelectionHistory(candidate);
     completeSelectionFlow();
     showToast('已加入茶仓库'); return setScreen('warehouse');
@@ -1427,7 +1445,7 @@ document.addEventListener('click', event => {
 document.addEventListener('submit', event => {
   const form = event.target.closest('form[data-action]'); if (!form) return;
   event.preventDefault(); const data = new FormData(form);
-  if (form.dataset.action === 'submit-merchant-reply') { const reply=String(data.get('merchant-reply') || '').trim(); if (reply) submitMerchantReply(reply); return; }
+  if (form.dataset.action === 'submit-merchant-reply') { const reply=String(data.get('merchant-reply') || '').trim(); if (reply) { productAnalytics.track('merchant_reply_started', { candidate_id: currentCandidate()?.serverCandidateId, decision_version_id: state.decisionVersionId || undefined, metadata: { screen: state.screen } }); submitMerchantReply(reply); } return; }
   if (form.dataset.action === 'save-needs') {
     const nextNeed = { taste:data.get('taste').trim()||'清爽花香', purpose:data.get('purpose').trim()||'送礼', budget:data.get('budget').trim()||'150–300 元' };
     saveSelectionNeed(nextNeed); return;

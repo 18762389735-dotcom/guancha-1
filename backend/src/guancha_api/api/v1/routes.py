@@ -2,7 +2,7 @@ import os
 from typing import Annotated
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, Response, UploadFile, status
 
 from guancha_api.application.phase2_service import Phase2ExtractionService
 from guancha_api.application.decision_service import SessionDecisionService
@@ -11,6 +11,7 @@ from guancha_api.application.merchant_reply_service import MerchantReplyService
 from guancha_api.application.answer_contract import build_selection_answer
 from guancha_api.repositories.idempotency import request_hash
 from guancha_api.schemas.contracts import BrewFeedbackAnalysisRequest, BrewFeedbackAnalysisResponse
+from guancha_api.product_events import CLIENT_EVENT_NAMES, ClientProductEvent, parse_analytics_session
 
 from guancha_api.core.errors import ApiErrorResponse
 from guancha_api.schemas.contracts import (
@@ -67,6 +68,20 @@ async def require_idempotency_key(
 
 ClientId = Annotated[UUID, Depends(require_client_id)]
 IdempotencyKey = Annotated[UUID, Depends(require_idempotency_key)]
+AnalyticsSession = Annotated[str | None, Header(alias="X-Analytics-Session-Id")]
+
+def _emit(raw: Request, *, event_name: str, resource_id: UUID, analytics_session: str | None, **fields: object) -> None:
+    raw.app.state.product_event_sink.emit_server(
+        event_name=event_name, resource_id=resource_id,
+        anonymous_session_id=parse_analytics_session(analytics_session), **fields,
+    )
+
+@router.post("/events", status_code=202)
+async def create_product_event(event: ClientProductEvent, raw: Request) -> dict[str, str]:
+    if event.event_name not in CLIENT_EVENT_NAMES:
+        raise HTTPException(status_code=422, detail="validation_error")
+    raw.app.state.product_event_sink.emit_client(event)
+    return {"status": "accepted"}
 
 def _repo(request: Request):
     if getattr(request.app.state, "repository", None) is None:
@@ -81,13 +96,13 @@ def _service(request: Request) -> Phase2ExtractionService:
     )
 
 def _decision_service(request: Request) -> SessionDecisionService:
-    return SessionDecisionService(_repo(request))
+    return SessionDecisionService(_repo(request), request.app.state.product_event_sink)
 
 def _question_service(request: Request) -> QuestionGenerationService:
     return QuestionGenerationService(_repo(request), request.app.state.reasoning_provider)
 
 def _merchant_reply_service(request: Request) -> MerchantReplyService:
-    return MerchantReplyService(_repo(request), request.app.state.merchant_reply_provider)
+    return MerchantReplyService(_repo(request), request.app.state.merchant_reply_provider, request.app.state.product_event_sink)
 
 def _job(value): return AnalysisJobResponse(id=value.id, candidate_id=value.candidate_id, candidate_image_id=value.candidate_image_id, status=value.status, stage=value.stage, attempt=value.attempt, error_code=value.error_code, extraction_version_id=value.extraction_version_id, decision_version_id=value.decision_version_id, decision_delta_id=value.decision_delta_id, processing_mode=value.processing_mode, created_at=value.created_at, updated_at=value.updated_at)
 def _image(value, job_id=None): return CandidateImageMetadata(id=value.id, candidate_id=value.candidate_id, content_type=value.content_type, size_bytes=value.size_bytes, sha256=value.sanitized_sha256, width=value.width, height=value.height, display_order=value.display_order, status=value.status, current_job_id=job_id, created_at=value.created_at)
@@ -165,11 +180,14 @@ async def analyze_brew_feedback(
         raise HTTPException(status_code=503, detail="feedback_analysis_failed") from exc
 
 @router.post("/selection-sessions", response_model=SelectionSession, status_code=201)
-async def create_selection_session(request: CreateSelectionSessionRequest, client_id: ClientId, idempotency_key: IdempotencyKey, raw: Request) -> SelectionSession:
-    return await _service(raw).create_session(
+async def create_selection_session(request: CreateSelectionSessionRequest, client_id: ClientId, idempotency_key: IdempotencyKey, raw: Request, x_analytics_session_id: AnalyticsSession = None) -> SelectionSession:
+    result = await _service(raw).create_session(
         client_id=client_id, idempotency_key=idempotency_key, need=request.need,
         recent_preference_evidence=request.recent_preference_evidence,
     )
+    _emit(raw, event_name="need_submitted", resource_id=result.id, analytics_session=x_analytics_session_id,
+          metadata={"has_budget": bool(request.need.budget_text), "has_sensory_need": bool(request.need.taste_text)})
+    return result
 
 @router.get("/selection-sessions/{session_id}", response_model=SelectionSession)
 async def get_selection_session(session_id: UUID, client_id: ClientId, raw: Request) -> SelectionSession:
@@ -180,10 +198,12 @@ async def update_selection_session(session_id: UUID, request: UpdateSelectionNee
     return await _service(raw).update_session_need(client_id=client_id, session_id=session_id, need=request.need, recent_preference_evidence=request.recent_preference_evidence)
 
 @router.post("/selection-sessions/{session_id}/candidates", response_model=Candidate, status_code=201)
-async def create_candidate(session_id: UUID, request: CreateCandidateRequest, client_id: ClientId, idempotency_key: IdempotencyKey, raw: Request) -> Candidate:
-    return await _service(raw).create_candidate(
+async def create_candidate(session_id: UUID, request: CreateCandidateRequest, client_id: ClientId, idempotency_key: IdempotencyKey, raw: Request, x_analytics_session_id: AnalyticsSession = None) -> Candidate:
+    result = await _service(raw).create_candidate(
         client_id=client_id, session_id=session_id, idempotency_key=idempotency_key, request=request
     )
+    _emit(raw, event_name="candidate_created", resource_id=result.id, analytics_session=x_analytics_session_id, candidate_id=result.id)
+    return result
 
 @router.get("/selection-sessions/{session_id}/candidates", response_model=tuple[Candidate, ...])
 async def list_candidates(session_id: UUID, client_id: ClientId, raw: Request) -> tuple[Candidate, ...]:
@@ -194,14 +214,17 @@ async def get_selection_snapshot(session_id: UUID, client_id: ClientId, raw: Req
     return await _repo(raw).selection_snapshot_for_client(session_id=session_id, client_id=client_id)
 
 @router.delete("/candidates/{candidate_id}", status_code=204)
-async def delete_candidate(candidate_id: UUID, client_id: ClientId, raw: Request) -> None:
+async def delete_candidate(candidate_id: UUID, client_id: ClientId, raw: Request, x_analytics_session_id: AnalyticsSession = None) -> None:
     await _service(raw).delete_candidate(client_id=client_id, candidate_id=candidate_id, storage=raw.app.state.temporary_storage)
+    _emit(raw, event_name="candidate_deleted", resource_id=candidate_id, analytics_session=x_analytics_session_id, candidate_id=candidate_id)
 
 @router.post("/candidates/{candidate_id}/images", response_model=UploadCandidateImageResponse, status_code=201)
-async def upload_candidate_image(candidate_id: UUID, client_id: ClientId, idempotency_key: IdempotencyKey, raw: Request, file: Annotated[UploadFile, File()]) -> UploadCandidateImageResponse:
+async def upload_candidate_image(candidate_id: UUID, client_id: ClientId, idempotency_key: IdempotencyKey, raw: Request, file: Annotated[UploadFile, File()], x_analytics_session_id: AnalyticsSession = None) -> UploadCandidateImageResponse:
     data = await file.read(5_242_881)
     try:
-        return await _service(raw).upload_image(client_id=client_id, candidate_id=candidate_id, idempotency_key=idempotency_key, data=data, declared_content_type=file.content_type or '', storage=raw.app.state.temporary_storage, task_runner=raw.app.state.task_runner, provider=raw.app.state.provider)
+        result = await _service(raw).upload_image(client_id=client_id, candidate_id=candidate_id, idempotency_key=idempotency_key, data=data, declared_content_type=file.content_type or '', storage=raw.app.state.temporary_storage, task_runner=raw.app.state.task_runner, provider=raw.app.state.provider)
+        _emit(raw, event_name="candidate_image_added", resource_id=result.image.id, analytics_session=x_analytics_session_id, candidate_id=candidate_id)
+        return result
     except ValueError as exc:
         code = getattr(exc, "error_code", ErrorCode.UNSAFE_OR_CORRUPT_IMAGE)
         raise HTTPException(422, code.value) from exc
@@ -213,18 +236,19 @@ async def get_candidate_image(candidate_image_id: UUID, client_id: ClientId, raw
     )
 
 @router.delete("/candidate-images/{candidate_image_id}", status_code=204)
-async def delete_candidate_image(candidate_image_id: UUID, client_id: ClientId, raw: Request) -> None:
+async def delete_candidate_image(candidate_image_id: UUID, client_id: ClientId, raw: Request, x_analytics_session_id: AnalyticsSession = None) -> None:
     await _service(raw).delete_image(
         client_id=client_id, image_id=candidate_image_id, storage=raw.app.state.temporary_storage
     )
+    _emit(raw, event_name="candidate_image_removed", resource_id=candidate_image_id, analytics_session=x_analytics_session_id)
 
 @router.get("/jobs/{job_id}", response_model=AnalysisJobResponse)
-async def get_job(job_id: UUID, client_id: ClientId, raw: Request) -> AnalysisJobResponse:
+async def get_job(job_id: UUID, client_id: ClientId, raw: Request, x_analytics_session_id: AnalyticsSession = None) -> AnalysisJobResponse:
     result = await _service(raw).get_job(client_id=client_id, job_id=job_id)
     return result
 
 @router.post("/selection-sessions/{session_id}/analyze", response_model=AnalysisJobResponse, status_code=201)
-async def analyze_selection_session(session_id: UUID, client_id: ClientId, idempotency_key: IdempotencyKey, raw: Request) -> AnalysisJobResponse:
+async def analyze_selection_session(session_id: UUID, client_id: ClientId, idempotency_key: IdempotencyKey, raw: Request, x_analytics_session_id: AnalyticsSession = None) -> AnalysisJobResponse:
     staged = await _service(raw).start_staged_extractions(
         session_id=session_id,
         client_id=client_id,
@@ -237,9 +261,13 @@ async def analyze_selection_session(session_id: UUID, client_id: ClientId, idemp
         # browser ignores this kickoff value and continues polling each
         # candidate job; a later call creates the session-decision job once
         # all candidate extractions are complete.
-        return staged[0]
-    job = await _decision_service(raw).analyze(session_id=session_id, client_id=client_id, idempotency_key=idempotency_key, task_runner=raw.app.state.task_runner)
-    return _job(job)
+        result = staged[0]
+        _emit(raw, event_name="analysis_started", resource_id=result.id, analytics_session=x_analytics_session_id, candidate_id=result.candidate_id, stage=result.stage.value, metadata={"processing_mode": result.processing_mode.value})
+        return result
+    job = await _decision_service(raw).analyze(session_id=session_id, client_id=client_id, idempotency_key=idempotency_key, task_runner=raw.app.state.task_runner, analytics_session_id=parse_analytics_session(x_analytics_session_id))
+    result = _job(job)
+    _emit(raw, event_name="analysis_started", resource_id=result.id, analytics_session=x_analytics_session_id, stage=result.stage.value, metadata={"processing_mode": result.processing_mode.value})
+    return result
 
 def _decision(version, decisions):
     return DecisionVersionResponse(
@@ -262,20 +290,28 @@ async def get_followup_questions(version_id: UUID, client_id: ClientId, raw: Req
     return await _question_service(raw).list_current(version_id=version_id, client_id=client_id)
 
 @router.post("/selection-sessions/{session_id}/merchant-replies", response_model=MerchantReply, status_code=201)
-async def create_merchant_reply(session_id: UUID, request: CreateMerchantReplyRequest, client_id: ClientId, idempotency_key: IdempotencyKey, raw: Request) -> MerchantReply:
-    return await _merchant_reply_service(raw).submit(session_id=session_id, client_id=client_id, idempotency_key=idempotency_key, request=request)
+async def create_merchant_reply(session_id: UUID, request: CreateMerchantReplyRequest, client_id: ClientId, idempotency_key: IdempotencyKey, raw: Request, x_analytics_session_id: AnalyticsSession = None) -> MerchantReply:
+    result = await _merchant_reply_service(raw).submit(session_id=session_id, client_id=client_id, idempotency_key=idempotency_key, request=request)
+    _emit(raw, event_name="merchant_reply_submitted", resource_id=result.id, analytics_session=x_analytics_session_id, candidate_id=result.candidate_id, decision_version_id=result.decision_version_id)
+    return result
 
 @router.get("/merchant-replies/{reply_id}", response_model=MerchantReply)
-async def get_merchant_reply(reply_id: UUID, client_id: ClientId, raw: Request) -> MerchantReply:
-    return await _merchant_reply_service(raw).get(reply_id=reply_id, client_id=client_id)
+async def get_merchant_reply(reply_id: UUID, client_id: ClientId, raw: Request, x_analytics_session_id: AnalyticsSession = None) -> MerchantReply:
+    result = await _merchant_reply_service(raw).get(reply_id=reply_id, client_id=client_id)
+    if result.parse_status in {"evasive", "not-answered", "partially-answered"}:
+        _emit(raw, event_name="merchant_reply_unusable", resource_id=result.id, analytics_session=x_analytics_session_id, candidate_id=result.candidate_id, decision_version_id=result.decision_version_id)
+    return result
 
 @router.post("/selection-sessions/{session_id}/rejudge", response_model=AnalysisJobResponse, status_code=201)
-async def rejudge_merchant_reply(session_id: UUID, request: CreateRejudgeRequest, client_id: ClientId, idempotency_key: IdempotencyKey, raw: Request) -> AnalysisJobResponse:
+async def rejudge_merchant_reply(session_id: UUID, request: CreateRejudgeRequest, client_id: ClientId, idempotency_key: IdempotencyKey, raw: Request, x_analytics_session_id: AnalyticsSession = None) -> AnalysisJobResponse:
     job = await _merchant_reply_service(raw).rejudge(
         session_id=session_id, client_id=client_id,
         idempotency_key=idempotency_key, task_runner=raw.app.state.task_runner,
+        analytics_session_id=parse_analytics_session(x_analytics_session_id),
     )
-    return _job(job)
+    result = _job(job)
+    _emit(raw, event_name="rejudge_started", resource_id=result.id, analytics_session=x_analytics_session_id, stage=result.stage.value, metadata={"processing_mode": result.processing_mode.value})
+    return result
 
 @router.get("/decision-deltas/{delta_id}", response_model=DecisionDelta)
 async def get_decision_delta(delta_id: UUID, client_id: ClientId, raw: Request) -> DecisionDelta:

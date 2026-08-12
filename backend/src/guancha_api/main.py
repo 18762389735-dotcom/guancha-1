@@ -41,6 +41,7 @@ from guancha_api.repositories.postgres import (
     ResourceNotFound,
 )
 from guancha_api.core.errors import ApiErrorDetail, ApiErrorResponse
+from guancha_api.product_events import ProductEventSink
 
 
 def _provider_from_environment(storage: InMemoryTemporaryPrivateStorage) -> StructuredVisionProvider:
@@ -109,6 +110,7 @@ def create_app(
     reasoning_provider: ReasoningProvider | None = None,
     merchant_reply_provider: MerchantReplyReasoningProvider | None = None,
     feedback_provider: FeedbackReasoningProvider | None = None,
+    product_event_sink: ProductEventSink | None = None,
 ) -> FastAPI:
     """Build an injectable API application; tests never need external services."""
     resolved_task_runner = task_runner or InProcessTaskRunner()
@@ -117,6 +119,7 @@ def create_app(
     resolved_reasoning_provider = reasoning_provider or FakeReasoningProvider()
     resolved_merchant_reply_provider = merchant_reply_provider or FakeMerchantReplyReasoningProvider()
     resolved_feedback_provider = feedback_provider or FakeFeedbackProvider()
+    resolved_product_event_sink = product_event_sink or ProductEventSink.from_environment()
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
@@ -134,6 +137,7 @@ def create_app(
         application.state.reasoning_provider = resolved_reasoning_provider
         application.state.merchant_reply_provider = resolved_merchant_reply_provider
         application.state.feedback_provider = resolved_feedback_provider
+        application.state.product_event_sink = resolved_product_event_sink
         if application.state.repository is not None:
             await application.state.repository.recover_interrupted_jobs()
         try:
@@ -154,6 +158,7 @@ def create_app(
     application.state.reasoning_provider = resolved_reasoning_provider
     application.state.merchant_reply_provider = resolved_merchant_reply_provider
     application.state.feedback_provider = resolved_feedback_provider
+    application.state.product_event_sink = resolved_product_event_sink
     application.state.feedback_replays = {}
     application.state.feedback_client_ids = {}
     application.include_router(v1_router)

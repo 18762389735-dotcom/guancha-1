@@ -27,6 +27,45 @@
       return { ...clone(fallback), ...payload, schemaVersion: version };
     };
   }
+  const merchantReplyPersistedFields = Object.freeze([
+    'id', 'selection_session_id', 'decision_version_id', 'followup_question_id',
+    'candidate_id', 'status', 'processing_status', 'parse_status', 'created_at', 'updated_at',
+  ]);
+  function persistedMerchantReplies(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    return Object.fromEntries(Object.entries(value).map(([questionId, reply]) => {
+      if (!reply || typeof reply !== 'object' || Array.isArray(reply)) return [questionId, {}];
+      return [questionId, Object.fromEntries(
+        merchantReplyPersistedFields
+          .filter((field) => reply[field] !== undefined && reply[field] !== null)
+          .map((field) => [field, reply[field]])
+      )];
+    }));
+  }
+  function selectionBridgeStore() {
+    const key = 'guancha.selection-bridge.v1';
+    const version = 2;
+    function sanitize(value) {
+      const payload = value && typeof value === 'object' && !Array.isArray(value) ? { ...value } : {};
+      delete payload.schemaVersion;
+      payload.reply = '';
+      payload.merchantReplies = persistedMerchantReplies(payload.merchantReplies);
+      return { schemaVersion: version, ...payload };
+    }
+    return {
+      key,
+      load(fallback) {
+        const raw = safeRead(key, null);
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return clone(fallback);
+        const cleaned = sanitize(raw);
+        // Reading legacy state is itself a privacy migration: the backing
+        // localStorage value must no longer retain merchant free text.
+        safeWrite(key, cleaned);
+        return { ...clone(fallback), ...cleaned };
+      },
+      save(value) { return safeWrite(key, sanitize(value)); },
+    };
+  }
   const pendingImageDatabase = 'guancha.pending-images.v1';
   const pendingImageStore = 'images';
   function withPendingImageStore(mode, callback) {
@@ -55,7 +94,7 @@
   };
   const stores = {
     uiSession: createStore('guancha.ui-session.v1', 1, withVersion(1)),
-    selectionBridge: createStore('guancha.selection-bridge.v1', 1, withVersion(1)),
+    selectionBridge: selectionBridgeStore(),
     localPostPurchase: createStore('guancha.local-post-purchase.v1', 1, withVersion(1)),
     preferenceEvidence: createStore('guancha.preference-evidence.v1', 1, (raw, fallback) => {
       if (!raw || typeof raw !== 'object' || !Array.isArray(raw.items)) return clone(fallback);

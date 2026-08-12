@@ -9,12 +9,14 @@ from guancha_api.domain.tieguanyin.rules.rule_schema import load_approved_rules
 from guancha_api.repositories.postgres import PostgresPhase2Repository, StoredJob
 from guancha_api.schemas.contracts import CreateMerchantReplyRequest, ErrorCode, MerchantReply
 from guancha_api.providers.merchant_reply import FakeMerchantReplyReasoningProvider, MerchantReplyReasoningProvider
+from guancha_api.product_events import ProductEventSink
 
 
 class MerchantReplyService:
-    def __init__(self, repository: PostgresPhase2Repository, provider: MerchantReplyReasoningProvider | None = None) -> None:
+    def __init__(self, repository: PostgresPhase2Repository, provider: MerchantReplyReasoningProvider | None = None, event_sink: ProductEventSink | None = None) -> None:
         self.repository = repository
         self.provider = provider or FakeMerchantReplyReasoningProvider()
+        self.event_sink = event_sink
 
     async def submit(self, *, session_id: UUID, client_id: UUID, idempotency_key: UUID, request: CreateMerchantReplyRequest) -> MerchantReply:
         row, _ = await self.repository.create_or_replay_merchant_reply(
@@ -31,6 +33,7 @@ class MerchantReplyService:
     async def rejudge(
         self, *, session_id: UUID, client_id: UUID, idempotency_key: UUID,
         task_runner: InProcessTaskRunner | ManualTaskRunner,
+        analytics_session_id: UUID | None = None,
     ) -> StoredJob:
         # The public action is session-scoped.  An anchor is retained only as
         # an internal audit/linkage field for the legacy non-null Job column.
@@ -43,11 +46,11 @@ class MerchantReplyService:
         if created:
             await task_runner.enqueue(
                 job_id=job.id,
-                task=lambda: self.run_rejudge(job_id=job.id, reply_id=reply_id, client_id=client_id, fingerprint=fingerprint),
+                task=lambda: self.run_rejudge(job_id=job.id, reply_id=reply_id, client_id=client_id, fingerprint=fingerprint, analytics_session_id=analytics_session_id),
             )
         return job
 
-    async def run_rejudge(self, *, job_id: UUID, reply_id: UUID, client_id: UUID, fingerprint: str) -> None:
+    async def run_rejudge(self, *, job_id: UUID, reply_id: UUID, client_id: UUID, fingerprint: str, analytics_session_id: UUID | None = None) -> None:
         if not await self.repository.claim_job(job_id=job_id):
             return
         try:
@@ -108,13 +111,18 @@ class MerchantReplyService:
                 "old_top_candidate_id": old_top, "new_top_candidate_id": decisions[0]["candidate_id"],
                 "explanation": "Saved merchant replies were aggregated and the current decision was recomputed.",
             }
+            version_id = uuid4()
             await self.repository.complete_aggregate_merchant_rejudgement(
                 job_id=job_id, client_id=client_id, anchor_reply_id=reply_id,
-                reply_ids=tuple(reply["id"] for reply in replies), version_id=uuid4(), decisions=decisions,
+                reply_ids=tuple(reply["id"] for reply in replies), version_id=version_id, decisions=decisions,
                 delta=delta, input_fingerprint=fingerprint,
             )
+            if self.event_sink:
+                self.event_sink.emit_server(event_name="rejudge_completed", resource_id=job_id, anonymous_session_id=analytics_session_id, decision_version_id=version_id, stage="completed")
         except Exception:
             await self.repository.fail_aggregate_merchant_rejudgement(job_id=job_id, error_code=ErrorCode.AI_SCHEMA_INVALID)
+            if self.event_sink:
+                self.event_sink.emit_server(event_name="rejudge_failed", resource_id=job_id, anonymous_session_id=analytics_session_id, stage="failed", error_category=ErrorCode.AI_SCHEMA_INVALID.value, metadata={"failure_category": "REJUDGE_INCONSISTENT"})
             raise
 
     async def parse(self, *, reply_id: UUID, client_id: UUID) -> None:

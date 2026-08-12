@@ -47,6 +47,7 @@
       const idempotencyKey = opts.idempotent ? (opts.idempotencyKey || createIdempotencyKey()) : null;
       const headers = {
         ...(clientId ? { 'X-Client-Id': clientId } : {}),
+        ...(global.GuanchaProductAnalytics ? { 'X-Analytics-Session-Id': global.GuanchaProductAnalytics.getSessionId() } : {}),
         ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
         ...(opts.headers || {}),
       };

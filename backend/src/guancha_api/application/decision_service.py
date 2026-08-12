@@ -7,17 +7,20 @@ from guancha_api.domain.tieguanyin.decision import evaluate_candidate, rank_with
 from guancha_api.domain.tieguanyin.rules.rule_schema import load_approved_rules
 from guancha_api.repositories.idempotency import request_hash
 from guancha_api.repositories.postgres import PostgresPhase2Repository, StoredJob
+from guancha_api.product_events import ProductEventSink
 
 
 class SessionDecisionService:
     """Coordinates a deterministic, one-session decision job outside HTTP routes."""
 
-    def __init__(self, repository: PostgresPhase2Repository) -> None:
+    def __init__(self, repository: PostgresPhase2Repository, event_sink: ProductEventSink | None = None) -> None:
         self.repository = repository
+        self.event_sink = event_sink
 
     async def analyze(
         self, *, session_id: UUID, client_id: UUID, idempotency_key: UUID,
         task_runner: InProcessTaskRunner | ManualTaskRunner,
+        analytics_session_id: UUID | None = None,
     ) -> StoredJob:
         session, inputs = await self.repository.decision_inputs_for_session(session_id=session_id, client_id=client_id)
         expected_ids = tuple(item["extraction_version_id"] for item in inputs)
@@ -29,10 +32,10 @@ class SessionDecisionService:
             request_hash=fingerprint, need_snapshot=need_snapshot, expected_extraction_version_ids=expected_ids,
         )
         if created:
-            await task_runner.enqueue(job_id=job.id, task=lambda: self.run(job_id=job.id, session_id=session_id, client_id=client_id, fingerprint=fingerprint, need_snapshot=need_snapshot, inputs_snapshot=inputs, recent_preference_evidence=recent_preference_evidence))
+            await task_runner.enqueue(job_id=job.id, task=lambda: self.run(job_id=job.id, session_id=session_id, client_id=client_id, fingerprint=fingerprint, need_snapshot=need_snapshot, inputs_snapshot=inputs, recent_preference_evidence=recent_preference_evidence, analytics_session_id=analytics_session_id))
         return job
 
-    async def run(self, *, job_id: UUID, session_id: UUID, client_id: UUID, fingerprint: str, need_snapshot: dict[str, object], inputs_snapshot: list[dict[str, object]], recent_preference_evidence: list[dict[str, object]] | None = None) -> None:
+    async def run(self, *, job_id: UUID, session_id: UUID, client_id: UUID, fingerprint: str, need_snapshot: dict[str, object], inputs_snapshot: list[dict[str, object]], recent_preference_evidence: list[dict[str, object]] | None = None, analytics_session_id: UUID | None = None) -> None:
         if not await self.repository.claim_job(job_id=job_id):
             return
         try:
@@ -47,8 +50,13 @@ class SessionDecisionService:
                     "action_bucket": draft.action_bucket.value, "rank_within_bucket": bucket_ranks[draft.action_bucket], "overall_order": overall_order,
                     "reasons": list(draft.reasons), "risk_flags": list(draft.risk_flags), "missing_critical_fields": list(draft.missing_critical_fields),
                     "score_components": draft.score_components, "internal_score": draft.internal_score})
-            await self.repository.complete_session_decision_job(job_id=job_id, session_id=session_id, client_id=client_id, version_id=uuid4(), rule_version="v1", input_fingerprint=fingerprint, decisions=decisions)
+            version_id = uuid4()
+            await self.repository.complete_session_decision_job(job_id=job_id, session_id=session_id, client_id=client_id, version_id=version_id, rule_version="v1", input_fingerprint=fingerprint, decisions=decisions)
+            if self.event_sink:
+                self.event_sink.emit_server(event_name="analysis_completed", resource_id=job_id, anonymous_session_id=analytics_session_id, decision_version_id=version_id, stage="completed")
         except Exception:
             from guancha_api.schemas.contracts import ErrorCode
             await self.repository.fail_session_decision_job(job_id=job_id, error_code=ErrorCode.AI_SCHEMA_INVALID)
+            if self.event_sink:
+                self.event_sink.emit_server(event_name="analysis_failed", resource_id=job_id, anonymous_session_id=analytics_session_id, stage="failed", error_category=ErrorCode.AI_SCHEMA_INVALID.value, metadata={"failure_category": "PROVIDER_ERROR"})
             raise
