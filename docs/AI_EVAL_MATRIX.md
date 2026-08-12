@@ -2,7 +2,7 @@
 
 Run date: 2026-08-13  
 Runtime: deterministic fake/pure tests; no real Provider calls.  
-Full result used below: backend 202 passed / 70 skipped; frontend 38 passed. DB-dependent cases skipped because `TEST_DATABASE_URL` was not configured.
+Full result used below: backend 205 passed / 76 skipped; frontend 41 passed. DB-dependent cases skipped because `TEST_DATABASE_URL` was not configured.
 
 | CASE ID | Category | Scenario | Input | Expected | Actual | Result | Failure Type |
 |---|---|---|---|---|---|---|---|
@@ -32,13 +32,13 @@ Full result used below: backend 202 passed / 70 skipped; frontend 38 passed. DB-
 | STATE-02 | State / Recovery | F5 during processing | snapshot current job=processing | resume Analysis | recovery helper/wiring tests passed | PASS | — |
 | STATE-03 | State / Recovery | F5 after V2 Delta | snapshot has current Decision + Delta | resume Rejudge and keep Delta | recovery helper/wiring tests passed | PASS | — |
 | STATE-04 | State / Recovery | Normal reopen/new tab | cached old identifiers, navigation not reload | Home | onboarding routing test passed | PASS | — |
-| STATE-05 | State / Recovery | Merchant textarea draft reload | unsubmitted text | draft recovered | No persistence is implemented | NOT_AUTOMATED | STATE_RECOVERY_ERROR |
+| STATE-05 | State / Recovery | Merchant textarea draft reload | unsubmitted text | draft recovered | No persistence is implemented; the draft is lost | FAIL | STATE_RECOVERY_ERROR |
 
 ## Totals
 
 - Total cases: 27
 - PASS: 24
-- FAIL: 0
-- NOT_AUTOMATED: 3
+- FAIL: 1
+- NOT_AUTOMATED: 2
 
-The three `NOT_AUTOMATED` cases are excluded from the PASS count. Two require an isolated PostgreSQL test database; the textarea draft is a recorded P2 and was intentionally not implemented.
+The two `NOT_AUTOMATED` cases require an isolated PostgreSQL test database. `STATE-05` is a known, accepted P2 debt and is counted as FAIL rather than hidden as unautomated.

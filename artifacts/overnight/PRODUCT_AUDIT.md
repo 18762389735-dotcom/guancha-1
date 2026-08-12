@@ -101,3 +101,38 @@ Scope: Competition MVP code, current-state documentation, fixtures, and automate
 - Evidence: read-only browser geometry audit; no horizontal overflow at 390×844, 430×844, or 1280×900.
 - Recommended minimal fix: evaluate only after Beta data; avoid an overnight layout rewrite.
 - Status: NOT FIXED — visual P2.
+
+## Remaining product findings (deduplicated)
+
+### GC-P1-06 — Seed tea store and journal look like user data
+
+- Severity: P1
+- Screen / Flow: Tea store / journal on first use
+- Observed behavior: the prototype ships populated tea and brew records before the user creates any.
+- Expected behavior: demo content must be unmistakably labelled or isolated from real user history.
+- Why this matters: users can mistake seed content for their own saved choices.
+- Evidence: populated `defaultState.warehouse` and `defaultState.journalRecords`.
+- Recommended minimal fix: use an explicit demo-data banner or empty first-user state.
+- Status: NOT FIXED.
+
+### GC-P1-07 — Historical recommendation and user selection can be conflated
+
+- Severity: P1
+- Screen / Flow: Selection history / tea store
+- Observed behavior: local history emphasizes the selected winner without retaining a sufficiently explicit distinction between AI recommendation and user choice.
+- Expected behavior: store both “system suggested” and “user selected” as separate concepts.
+- Why this matters: later review can falsely imply that the system recommended what the user independently chose.
+- Evidence: local `addSelectionHistory` winner-centric record.
+- Recommended minimal fix: split recommendation snapshot from final user action.
+- Status: NOT FIXED.
+
+### GC-P0-03 — Full merchant reply persisted in localStorage
+
+- Severity: P0 / deployment blocker
+- Screen / Flow: Merchant reply → browser persistence
+- Observed behavior: complete `merchantReplies.raw_text` is saved in the selection bridge in localStorage.
+- Expected behavior: sensitive natural-language replies remain server-side or are locally minimized/redacted with a clear retention policy.
+- Why this matters: localStorage is broadly readable by same-origin scripts and persists beyond the immediate screen.
+- Evidence: Browser privacy audit of the current persistence payload.
+- Recommended minimal fix: persist reply ids/status only; fetch authorized reply detail from the server when needed.
+- Status: NOT FIXED; `DO_NOT_DEPLOY`.

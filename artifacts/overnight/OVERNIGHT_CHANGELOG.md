@@ -68,3 +68,23 @@ Date: 2026-08-13
 - Server candidate reorder may change the visible candidate because the numeric index, not candidate id, is preserved (P1).
 - Merchant reply overlay and unsubmitted textarea are not restored automatically (P1 audit finding; explicitly deprioritized in this repair).
 - At 390×568 the Home primary CTA begins below the initial viewport (P2); no horizontal overflow was observed at the audited larger viewports.
+- Seed tea-store/journal content and recommendation-vs-selection history semantics remain P1 product debt.
+- AI contract debt remains around aroma concept levels, Delta risk semantics, question value ordering, live marketing schema, inferred hard-decision inputs, and vague replies.
+- Browser privacy audit found complete merchant reply raw text in localStorage. This is a deployment-blocking remaining issue.
+
+## Independent Red Team repair history
+
+1. Review of `5b4affb` failed: unconfigured remote Need could report local success; repository conflict persistence overrode the parser boundary; session Decision recovery was incomplete.
+2. `cc3f6d6` repaired those boundaries and added executable tests.
+3. Review of `cc3f6d6` failed: the recovery query was inserted in `answer_contract_inputs_for_session`, referenced an undefined `session`, and left Snapshot returning an undefined variable.
+4. `ec63be4` moved the query to Snapshot scope and added no-DB method-level cursor tests.
+5. Final Red Team result at `ec63be4`: PASS for the locally executable scope, with no open P0/P1 directly caused by the selected changes. Real PostgreSQL remains unexecuted.
+
+## Final verification and release boundary
+
+- Frontend: 41/41 PASS.
+- Backend: 205 PASS / 76 SKIP; every skip is reported, not promoted to PASS.
+- Python compile, Node syntax, and diff checks: PASS.
+- Browser: NO-GO because the real PostgreSQL chain was blocked.
+- Privacy: NO-GO because complete merchant reply raw text remains in localStorage.
+- Deployment: `DO_NOT_DEPLOY`.

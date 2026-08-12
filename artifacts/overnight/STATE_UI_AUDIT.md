@@ -66,3 +66,14 @@ Date: 2026-08-13
 ## Responsive and browser limitation
 
 Automated tests cover routing and state helpers, not rendered geometry. The read-only audit found no horizontal overflow at 390×844, 430×844, or 1280×900, but found the short-viewport CTA issue above. This is not a complete end-to-end browser PASS.
+
+## Final browser and privacy findings
+
+- Browser verdict: **FAIL / NO-GO**. Static navigation checks passed, but the real decision chain was blocked by the unavailable configured database/runtime.
+- Passed in browser: complete/skip onboarding; reload, cold start, new tab, back/forward; no-session Need save; 1/2/5 candidates at 390/430/390×568/desktop; zero console errors or warnings.
+- Blocked: real-session Need PATCH; analysis, Evidence, Question, Reply, Rejudge, Delta, and tea-store completion through the backend.
+- Static POST returned 501 and the UI exposed `request_failed`; this proves failure handling, not the product chain.
+- 14 requests: 12 returned 200; public config and favicon returned 404.
+- A fixed CTA overlaps content by about 6 px. Some touch targets are below 44 px, and a decorative leaf can cover the Need edit control.
+- Full raw screenshot Blob is stored in IndexedDB; a 160×160 preview in localStorage is proportionate for display. Full `merchantReplies.raw_text` in localStorage is not acceptable for deployment.
+- No API key, cookie, telemetry payload, or other secret leakage was observed.

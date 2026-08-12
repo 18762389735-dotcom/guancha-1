@@ -51,3 +51,16 @@ The current pipeline still follows Extraction → Evidence → Sensory Interpret
 - Sensory output remains qualified and avoids quality judgments.
 - Bucket priority remains above sensory tie-break signals.
 - Aggregate rejudge DB closure remains NOT_AUTOMATED tonight because the dedicated test database is unavailable; the DB tests were skipped rather than reported as passed.
+
+## Remaining AI findings
+
+| ID | Severity | Finding | Risk / minimal next check |
+|---|---|---|---|
+| AI-REM-01 | P1 | Aroma values mix enum and concept levels (`qingxiang`, `floral`, orchid-like concepts). | Comparisons may look exact while categories are not equivalent; define one bounded aroma vocabulary and mapping tests. |
+| AI-REM-02 | P1 | Delta risk lists can misstate whether a risk was added or resolved when evidence status changes across versions. | Verify old/new risk set semantics against real PostgreSQL V1/V2/Delta fixtures. |
+| AI-REM-03 | P1 | Question ordering can overvalue generic completeness versus current preference and counterfactual decision value. | Add preference-aware value ordering fixtures without allowing history to override current Need. |
+| AI-REM-04 | P1 | Live Provider marketing schema remains a blind spot despite fake-fixture safety. | Run a bounded real-provider holdout only after environment approval; do not infer PASS from deterministic fixtures. |
+| AI-REM-05 | P1 | Inferred evidence may still participate in hard decision inputs outside the user-facing known-fact mapper. | Audit `_evidence_values` and rule conditions; explicit-only hard-decision policy needs a product decision. |
+| AI-REM-06 | P2 | Vague replies beyond the closed fake vocabulary may remain partially answered without precise recovery guidance. | Expand adversarial reply fixtures before changing production parsing. |
+
+No real MiMo call ran tonight. These are remaining risks, not claims that a live Provider failed.
