@@ -25,6 +25,33 @@
     const components = decision.score_components || {};
     return Number(components.explicit_sensory_need_match || 0) + Number(components.need_match || 0);
   }
+  function invalidateDecisionState(state = {}) {
+    return {
+      decisionVersionId: null,
+      decisionJobId: null,
+      decisionStatus: 'not_requested',
+      selectionAnswer: null,
+      followupQuestions: [],
+      questionStatus: 'idle',
+      questionDecisionVersionId: null,
+      merchantReplyIds: {},
+      merchantReplies: {},
+      rejudgeJobId: null,
+      lastDecisionDelta: null,
+      deltaStatus: 'idle',
+      candidates: (state.candidates || []).map((candidate) => ({ ...candidate, decision: null, riskFlags: [] })),
+    };
+  }
+  function activeRecoveryScreen(snapshot = {}) {
+    if (snapshot.decision_delta) return 'rejudge';
+    if (['queued', 'processing'].includes(snapshot.rejudge_job?.status)) return 'rejudge';
+    const hasActiveAnalysis = (snapshot.candidates || []).some((candidate) => {
+      if (['queued', 'processing'].includes(candidate.current_extraction?.status)) return true;
+      return (candidate.images || []).some((image) => ['queued', 'processing'].includes(image.current_job_status || image.status));
+    });
+    if (hasActiveAnalysis) return 'analysis';
+    return snapshot.current_decision_id ? 'result' : 'candidates';
+  }
   function buildPreferenceReference({ o1 = {}, o2 = {} } = {}) {
     const references = [];
     const selectedDrinks = Object.values(o1).flat().filter(Boolean).slice(0, 2);
@@ -63,5 +90,5 @@
     if (preferenceReference.length) lines.push(`${preferenceReference.map((item) => item.text).join('')}这只作为低置信口味参考，不会覆盖你这次的需求。`);
     return { lines, preferenceReference };
   }
-  global.GuanchaAdapters = { actionLabels, jobToCandidateStatus, candidateToViewModel, sensoryNeedMatch, buildPreferenceReference, buildPersonalFitPresentation };
+  global.GuanchaAdapters = { actionLabels, jobToCandidateStatus, candidateToViewModel, sensoryNeedMatch, invalidateDecisionState, activeRecoveryScreen, buildPreferenceReference, buildPersonalFitPresentation };
 }(window));

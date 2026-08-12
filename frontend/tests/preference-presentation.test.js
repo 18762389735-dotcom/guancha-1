@@ -49,3 +49,32 @@ test('fit presentation uses explicit sensory and legacy need signals together', 
   assert.equal(api.sensoryNeedMatch({ score_components: { explicit_sensory_need_match: -1, need_match: 1 } }), 0);
   assert.equal(api.sensoryNeedMatch({}), 0);
 });
+
+test('changing Need invalidates every derived decision artifact but preserves extraction', () => {
+  const api = adapters();
+  const invalidated = api.invalidateDecisionState({
+    decisionVersionId: 'v2', decisionJobId: 'job', selectionAnswer: { headline: 'old' },
+    followupQuestions: [{ id: 'q1' }], merchantReplyIds: { q1: 'r1' },
+    merchantReplies: { q1: { id: 'r1' } }, rejudgeJobId: 'rejudge', lastDecisionDelta: { id: 'delta' },
+    candidates: [{ id: 'a', extraction: { id: 'extract-a' }, decision: { overall_order: 1 }, riskFlags: ['old-risk'] }],
+  });
+  assert.equal(invalidated.decisionVersionId, null);
+  assert.equal(invalidated.selectionAnswer, null);
+  assert.equal(invalidated.followupQuestions.length, 0);
+  assert.equal(Object.keys(invalidated.merchantReplyIds).length, 0);
+  assert.equal(invalidated.lastDecisionDelta, null);
+  assert.equal(invalidated.candidates[0].extraction.id, 'extract-a');
+  assert.equal(invalidated.candidates[0].decision, null);
+});
+
+test('server snapshot recovers active analysis and completed rejudge screens', () => {
+  const api = adapters();
+  assert.equal(api.activeRecoveryScreen({
+    candidates: [{ images: [{ current_job_status: 'processing' }] }], current_decision_id: null,
+  }), 'analysis');
+  assert.equal(api.activeRecoveryScreen({
+    candidates: [], current_decision_id: 'v2', decision_delta: { id: 'delta-1' },
+  }), 'rejudge');
+  assert.equal(api.activeRecoveryScreen({ candidates: [], current_decision_id: 'v1' }), 'result');
+  assert.equal(api.activeRecoveryScreen({ candidates: [] }), 'candidates');
+});

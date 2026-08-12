@@ -150,3 +150,22 @@ test('one merchant reply is bound to exactly one current question without fan-ou
   assert.match(source, /const currentQuestion = merchantQuestions\(currentCandidate\(\)\)\.find/);
   assert.match(source, /对应：\$\{escapeHtml\(currentQuestion\.question\)\}/);
 });
+
+test('Need edits update the server before clearing stale decision and returning to candidates', () => {
+  const source = fs.readFileSync(path.resolve(root, '..', 'app.js'), 'utf8');
+  const start = source.indexOf('async function saveSelectionNeed(nextNeed)');
+  const end = source.indexOf('function drinkGroup(', start);
+  const implementation = source.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.ok(implementation.indexOf('await apiClient.updateSelectionSession') < implementation.indexOf('state.need = nextNeed'));
+  assert.match(implementation, /GuanchaAdapters\.invalidateDecisionState\(state\)/);
+  assert.match(implementation, /state\.screen = 'candidates'/);
+});
+
+test('active snapshot recovery uses server job status and preserves rejudge delta screen', () => {
+  const source = fs.readFileSync(path.resolve(root, '..', 'app.js'), 'utf8');
+  assert.match(source, /const recoveryScreen = GuanchaAdapters\.activeRecoveryScreen\(snapshot\)/);
+  assert.match(source, /current_job_status/);
+  assert.match(source, /state\.screen = recoveryScreen/);
+  assert.doesNotMatch(source, /state\.screen === 'analysis' \|\| state\.screen === 'candidates'\) state\.screen = 'result'/);
+});

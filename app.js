@@ -183,11 +183,11 @@ function saveState() {
   GuanchaStores.selectionBridge.save({ sessionId: state.sessionId || null, candidates: state.candidates, reply: state.reply || '', need: state.need, decisionVersionId: state.decisionVersionId || null, decisionJobId: state.decisionJobId || null, decisionStatus: state.decisionStatus || 'not_requested', selectionAnswer: state.selectionAnswer || null, followupQuestions: state.followupQuestions || [], questionStatus: state.questionStatus || 'idle', questionDecisionVersionId: state.questionDecisionVersionId || null, merchantReplyIds: state.merchantReplyIds || {}, merchantReplies: state.merchantReplies || {}, rejudgeJobId: state.rejudgeJobId || null, lastDecisionDelta: state.lastDecisionDelta || null, deltaStatus: state.deltaStatus || 'idle', jobIds: state.jobIds || {} });
   GuanchaStores.localPostPurchase.save({ warehouse: state.warehouse, journalRecords: state.journalRecords, history: state.history, selectedTeaId: state.selectedTeaId || null });
 }
-function apiNeed() {
+function apiNeed(need = state.need) {
   return {
-    taste_text: state.need.taste || null,
-    purpose_text: state.need.purpose || null,
-    budget_text: state.need.budget || null,
+    taste_text: need.taste || null,
+    purpose_text: need.purpose || null,
+    budget_text: need.budget || null,
     risk_attitude_text: null,
   };
 }
@@ -408,13 +408,14 @@ async function resumeLiveBackendState() {
   if (!apiClient.isConfigured || !state.sessionId) return;
   try {
     const snapshot = await apiClient.getSelectionSnapshot(state.sessionId);
+    const recoveryScreen = GuanchaAdapters.activeRecoveryScreen(snapshot);
     const pendingLocal = state.candidates.filter(candidate => !candidate.serverCandidateId && (candidate.images || []).some(image => image.localOnly));
     state.candidates = snapshot.candidates.map((remote, index) => ({
       letter: remote.display_label || String.fromCharCode(65 + index), name: remote.display_name || `候选茶 ${remote.display_label || index + 1}`,
       type: '商品信息整理中', fields: '', serverCandidateId: remote.id,
       images: (remote.images || []).map(image => ({ id: `server-${image.id}`, serverImageId: image.id, status: image.status, localOnly: false })),
       serverImageId: remote.images?.at(-1)?.id || null, jobId: remote.images?.at(-1)?.current_job_id || null,
-      extractionStatus: remote.current_extraction?.status || remote.images?.at(-1)?.status || 'queued', extraction: null,
+      extractionStatus: remote.current_extraction?.status || remote.images?.at(-1)?.current_job_status || remote.images?.at(-1)?.status || 'queued', extraction: null,
     })).concat(pendingLocal);
     state.decisionVersionId = snapshot.current_decision_id || null;
     state.selectionAnswer = null;
@@ -434,6 +435,10 @@ async function resumeLiveBackendState() {
     } else if (snapshot.question_generation_status === 'completed') state.questionStatus = 'not-needed';
     else if (snapshot.question_generation_status === 'failed') state.questionStatus = 'failed';
     else state.questionStatus = 'idle';
+    // Only a reload of an explicitly active selection flow may resume a
+    // transient screen. A normal reopen stays on Home even if cached server
+    // identifiers still exist.
+    if (state.activeSelectionFlow === true && state.screen !== 'home') state.screen = recoveryScreen;
   } catch (error) {
     if (error?.code === 'selection_session_not_found') clearStaleRemoteSelection();
     return;
@@ -459,7 +464,7 @@ async function resumeLiveBackendState() {
       // returns transient screens to candidates.  Once the server confirms a
       // current Decision, resume the useful destination instead of presenting
       // an already-completed selection as if it still needs analysis.
-      if (state.screen === 'analysis' || state.screen === 'candidates') state.screen = 'result';
+      if (state.screen === 'candidates') state.screen = 'result';
     } catch { state.decisionStatus = 'failed'; }
   } else if (state.decisionJobId) {
     state.decisionStatus = 'loading';
@@ -838,6 +843,20 @@ function candidateRow(candidate, index) {
 
 function renderO1() {
   return `<section class="page preference-page"><button class="icon-btn back-btn" data-action="go-home" aria-label="返回">${icon('back')}</button><div class="progress-mark"><span class="active"></span><span></span></div><h1>你平时喜欢喝什么？</h1><p class="lead">不用懂茶，从你熟悉的饮品开始，让观茶先了解你喜欢什么感觉。</p><div class="preference-categories">${Object.entries(DRINKS).map(([key, info]) => drinkGroup(key, info)).join('')}</div><div class="preference-footer"><button class="primary-btn" data-action="go-o2">下一步</button><button class="skip" data-action="skip-preferences">暂时跳过，稍后再设置</button></div></section>`;
+}
+async function saveSelectionNeed(nextNeed) {
+  try {
+    if (state.sessionId && apiClient.isConfigured) {
+      await apiClient.updateSelectionSession(state.sessionId, apiNeed(nextNeed), readPreferenceEvidence());
+    }
+    state.need = nextNeed;
+    Object.assign(state, GuanchaAdapters.invalidateDecisionState(state));
+    state.overlay = null;
+    state.screen = 'candidates';
+    saveState(); render(); showToast('本次需求已更新，请重新分析候选茶');
+  } catch (error) {
+    showToast(error?.code === 'selection_session_not_found' ? '本次选择已失效，请返回候选重新开始' : '需求更新失败，请稍后重试');
+  }
 }
 function drinkGroup(key, info) {
   const isOpen = state.openDrink === key;
@@ -1403,7 +1422,10 @@ document.addEventListener('submit', event => {
   const form = event.target.closest('form[data-action]'); if (!form) return;
   event.preventDefault(); const data = new FormData(form);
   if (form.dataset.action === 'submit-merchant-reply') { const reply=String(data.get('merchant-reply') || '').trim(); if (reply) submitMerchantReply(reply); return; }
-  if (form.dataset.action === 'save-needs') { state.need={taste:data.get('taste').trim()||'清爽花香', purpose:data.get('purpose').trim()||'送礼', budget:data.get('budget').trim()||'150–300 元'}; state.overlay=null; saveState(); render(); showToast('本次需求已更新'); return; }
+  if (form.dataset.action === 'save-needs') {
+    const nextNeed = { taste:data.get('taste').trim()||'清爽花香', purpose:data.get('purpose').trim()||'送礼', budget:data.get('budget').trim()||'150–300 元' };
+    saveSelectionNeed(nextNeed); return;
+  }
   if (form.dataset.action === 'save-stock') { const name=String(data.get('name')).trim(); if(!name) return showToast('请填写茶名'); state.warehouse.unshift({ id:`tea-${Date.now()}`, name, type:String(data.get('type'))||'不确定', aroma:String(data.get('aroma')).trim()||'不确定', status:'drinking', source:'手动入库', lastBrew:'还未泡过', records:0, art:'can', facts:['待补充'], risks:['产地与年份未记录'] }); saveState(); showToast('已加入茶仓库'); return setScreen('warehouse'); }
   if (form.dataset.action === 'save-plan') { const p=ensureBrew().plan; ['ware','water','grams','temp'].forEach(key=>p[key]=String(data.get(key)).trim()||p[key]); p.seconds=Math.min(60,Math.max(3,Number(data.get('seconds'))||10)); state.overlay=null; saveState(); render(); showToast('冲泡参数已更新'); }
 });

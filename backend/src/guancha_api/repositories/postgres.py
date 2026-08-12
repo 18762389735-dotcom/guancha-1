@@ -833,9 +833,9 @@ class PostgresPhase2Repository:
             for candidate in candidates:
                 await cursor.execute(
                     """select i.id,i.content_type,i.size_bytes,i.sanitized_sha256 as sha256,i.width,i.height,i.display_order,i.status,i.created_at,
-                              j.id as current_job_id,j.error_code
+                              j.id as current_job_id,j.status as current_job_status,j.error_code
                        from candidate_images i left join lateral (
-                         select id,error_code from analysis_jobs where candidate_image_id=i.id order by created_at desc limit 1
+                         select id,status,error_code from analysis_jobs where candidate_image_id=i.id order by created_at desc limit 1
                        ) j on true where i.candidate_id=%s and i.status <> 'deleted' order by i.display_order""",
                     (candidate["id"],),
                 )
