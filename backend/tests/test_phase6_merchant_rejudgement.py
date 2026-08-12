@@ -124,6 +124,54 @@ async def test_merchant_reply_rejudgement_creates_append_only_decision_v2(reposi
         assert delta.json()["new_decision_version_id"] == v2
 
 
+@pytest.mark.parametrize(("product_status", "product_value", "expected_status"), [
+    ("unknown", "heavy", "explicit"),
+    ("inferred", "heavy", "explicit"),
+    ("explicit", "", "explicit"),
+    ("explicit", "light", "explicit"),
+    ("explicit", "heavy", "conflict"),
+])
+async def test_persisted_merchant_conflict_requires_an_explicit_known_opposite_product_claim(
+    repository: PostgresPhase2Repository, product_status: str, product_value: str, expected_status: str,
+) -> None:
+    runner = ManualTaskRunner()
+    app = create_app(repository=repository, task_runner=runner, temporary_storage=InMemoryTemporaryPrivateStorage(), provider=_vision(), merchant_reply_provider=AnsweringReplyProvider())
+    headers = {"X-Client-Id": str(uuid4())}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        session_id, v1 = await _current_decision(client, headers, runner)
+        async with repository._connection.cursor() as cursor:
+            await cursor.execute(
+                """select cd.extraction_version_id,v.source_image_id,c.id as candidate_id
+                   from candidate_decisions cd join extraction_versions v on v.id=cd.extraction_version_id
+                   join candidates c on c.id=cd.candidate_id where cd.decision_version_id=%s limit 1""",
+                (v1,),
+            )
+            evidence = await cursor.fetchone()
+            await cursor.execute(
+                """insert into evidence_items (id,extraction_version_id,field_name,raw_text,normalized_value,model_confidence,
+                   information_status,source_type,verification_status,source_image_id,source_location,evidence_strength)
+                   values (%s,%s,'roast_level',%s,%s,0.8,%s,'product-claim','unverified',%s,'test','medium')""",
+                (uuid4(), evidence["extraction_version_id"], product_value, product_value, product_status, evidence["source_image_id"]),
+            )
+        questions = await client.post(
+            f"/api/v1/decision-versions/{v1}/questions",
+            headers={**headers, "Idempotency-Key": str(uuid4())},
+        )
+        roast_question = next(item for item in questions.json() if item["field_key"] == "roast_level")
+        reply = await client.post(
+            f"/api/v1/selection-sessions/{session_id}/merchant-replies",
+            headers={**headers, "Idempotency-Key": str(uuid4())},
+            json={"decision_version_id": v1, "followup_question_id": roast_question["id"], "raw_text": "light roast"},
+        )
+        assert reply.status_code == 201
+        assert await runner.drain() == 1
+        async with repository._connection.cursor() as cursor:
+            await cursor.execute("select information_status,conflicts_with_evidence_id from merchant_claims where merchant_reply_id=%s", (reply.json()["id"],))
+            persisted = await cursor.fetchone()
+        assert persisted["information_status"] == expected_status
+        assert (persisted["conflicts_with_evidence_id"] is not None) is (expected_status == "conflict")
+
+
 async def test_rejudge_aggregates_all_saved_replies_into_one_delta(repository: PostgresPhase2Repository) -> None:
     class MultiFieldProvider:
         async def parse_merchant_reply(self, *, field_key, raw_text, **_kwargs):

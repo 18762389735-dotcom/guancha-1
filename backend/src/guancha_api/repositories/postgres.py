@@ -81,6 +81,16 @@ class MerchantReplyNotAvailable(RepositoryError):
     pass
 
 
+def _explicit_product_conflict(product: dict[str, object] | None, merchant_value: object) -> bool:
+    """Only a known, explicit product-page value can oppose a merchant claim."""
+    if not product or product.get("source_type") != "product-claim" or product.get("information_status") != "explicit":
+        return False
+    product_value = str(product.get("normalized_value") or "").strip().casefold()
+    if not product_value or product_value == "unknown":
+        return False
+    return product_value != str(merchant_value or "").strip().casefold()
+
+
 @dataclass(frozen=True)
 class StoredImage:
     id: UUID
@@ -736,6 +746,25 @@ class PostgresPhase2Repository:
 
     async def answer_contract_inputs_for_session(self, *, session_id: UUID, client_id: UUID) -> tuple[dict[str, object], list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]] | None:
         current = await self.get_current_decision_for_session(session_id=session_id, client_id=client_id)
+        current_decision_id = None if current is None else current[0]["id"]
+        async with self._connection.cursor() as cursor:
+            await cursor.execute(
+                """select j.id,j.status,j.stage,j.error_code,j.decision_version_id,j.created_at,j.updated_at
+                   from analysis_jobs j join candidates anchor on anchor.id=j.candidate_id
+                   where anchor.selection_session_id=%s and j.job_kind='session_decision' and (
+                     (j.status='completed' and j.decision_version_id=%s)
+                     or (j.status in ('queued','processing','failed','stale')
+                       and j.decision_need_snapshot=%s
+                       and j.expected_extraction_version_ids=(
+                         select coalesce(array_agg(v.id order by c.display_order),array[]::uuid[])
+                         from candidates c join extraction_versions v on v.candidate_id=c.id
+                           and v.is_current and v.status='completed'
+                         where c.selection_session_id=%s and c.status='active'
+                       ))
+                   ) order by j.created_at desc limit 1""",
+                (session_id, current_decision_id, psycopg.types.json.Jsonb(session["need"]), session_id),
+            )
+            session_decision_job = await cursor.fetchone()
         if current is None:
             return None
         version, decisions = current
@@ -853,6 +882,7 @@ class PostgresPhase2Repository:
                 "questions": [],
                 "merchant_replies": [],
                 "rejudge_job": None,
+                "session_decision_job": session_decision_job,
                 "decision_delta": None,
             }
 
@@ -905,6 +935,7 @@ class PostgresPhase2Repository:
             "questions": questions,
             "merchant_replies": replies,
             "rejudge_job": rejudge_job,
+            "session_decision_job": session_decision_job,
             "decision_delta": delta,
         }
 
@@ -1056,12 +1087,13 @@ class PostgresPhase2Repository:
                     if claim.get("field_key") != reply["field_key"]:
                         raise ValueError("Reply parser returned a field outside the follow-up question")
                     await cursor.execute(
-                        """select id,normalized_value from evidence_items where extraction_version_id=%s and field_name=%s
-                           and source_type='product-claim' order by created_at limit 1""",
+                        """select id,normalized_value,information_status,source_type from evidence_items
+                           where extraction_version_id=%s and field_name=%s and source_type='product-claim'
+                           order by (information_status='explicit') desc,created_at limit 1""",
                         (reply["extraction_version_id"], claim["field_key"]),
                     )
                     product = await cursor.fetchone()
-                    conflict = product is not None and product["normalized_value"] not in (None, claim["normalized_value"])
+                    conflict = _explicit_product_conflict(product, claim["normalized_value"])
                     claim_id = uuid4()
                     await cursor.execute(
                         """insert into merchant_claims (id,merchant_reply_id,candidate_id,field_key,raw_text,normalized_value,
@@ -1341,12 +1373,13 @@ class PostgresPhase2Repository:
                     if claim.get("field_key") != state["field_key"]:
                         raise ValueError("Reply parser returned a field outside the follow-up question")
                     await cursor.execute(
-                        """select id,normalized_value from evidence_items where extraction_version_id=%s and field_name=%s
-                           and source_type='product-claim' order by created_at limit 1""",
+                        """select id,normalized_value,information_status,source_type from evidence_items
+                           where extraction_version_id=%s and field_name=%s and source_type='product-claim'
+                           order by (information_status='explicit') desc,created_at limit 1""",
                         (state["extraction_version_id"], claim["field_key"]),
                     )
                     product = await cursor.fetchone()
-                    conflict = product is not None and product["normalized_value"] not in (None, claim["normalized_value"])
+                    conflict = _explicit_product_conflict(product, claim["normalized_value"])
                     information_status = 'conflict' if conflict else 'explicit'
                     await cursor.execute(
                         """insert into merchant_claims (id,merchant_reply_id,candidate_id,field_key,raw_text,normalized_value,

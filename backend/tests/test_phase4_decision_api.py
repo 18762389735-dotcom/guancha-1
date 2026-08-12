@@ -89,6 +89,25 @@ async def test_session_decision_job_creates_immutable_current_snapshot(repositor
         assert stale.status_code == 404
 
 
+async def test_snapshot_exposes_only_the_current_session_decision_job_lineage(repository: PostgresPhase2Repository) -> None:
+    runner = ManualTaskRunner()
+    app = create_app(repository=repository, task_runner=runner, temporary_storage=InMemoryTemporaryPrivateStorage(), provider=_provider())
+    headers = {"X-Client-Id": str(uuid4())}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        session_id = await _prepared_session(client, headers, runner, 1)
+        queued = await client.post(
+            f"/api/v1/selection-sessions/{session_id}/analyze",
+            headers={**headers, "Idempotency-Key": str(uuid4())},
+        )
+        snapshot = await client.get(f"/api/v1/selection-sessions/{session_id}/snapshot", headers=headers)
+        assert snapshot.json()["session_decision_job"]["id"] == queued.json()["id"]
+        assert snapshot.json()["session_decision_job"]["status"] == "queued"
+        assert await runner.drain() == 1
+        completed = await client.get(f"/api/v1/selection-sessions/{session_id}/snapshot", headers=headers)
+        assert completed.json()["session_decision_job"]["status"] == "completed"
+        assert completed.json()["session_decision_job"]["decision_version_id"] == completed.json()["current_decision_id"]
+
+
 async def test_selection_answer_hides_evidence_enums_and_keeps_candidate_scope(repository: PostgresPhase2Repository) -> None:
     runner = ManualTaskRunner()
     app = create_app(repository=repository, task_runner=runner, temporary_storage=InMemoryTemporaryPrivateStorage(), provider=_provider())

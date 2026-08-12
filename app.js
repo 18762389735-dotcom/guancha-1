@@ -426,6 +426,12 @@ async function resumeLiveBackendState() {
     state.merchantReplyIds = Object.fromEntries((snapshot.merchant_replies || []).map(reply => [reply.followup_question_id, reply.id]));
     state.merchantReplies = Object.fromEntries((snapshot.merchant_replies || []).map(reply => [reply.followup_question_id, reply]));
     state.lastDecisionDelta = snapshot.decision_delta || null;
+    const sessionDecisionJob = snapshot.session_decision_job || null;
+    state.decisionJobId = ['queued', 'processing'].includes(sessionDecisionJob?.status) ? sessionDecisionJob.id : null;
+    if (['failed', 'stale'].includes(sessionDecisionJob?.status)) {
+      state.decisionStatus = 'failed';
+      state.decisionError = sessionDecisionJob.error_code || 'decision_failed';
+    }
     state.rejudgeJobId = ['queued', 'processing'].includes(snapshot.rejudge_job?.status) ? snapshot.rejudge_job.id : null;
     if (state.rejudgeJobId) state.questionStatus = 'rejudging';
     else if (snapshot.decision_delta || (snapshot.question_decision_version_id && snapshot.question_decision_version_id !== snapshot.current_decision_id)) state.questionStatus = 'completed';
@@ -846,11 +852,11 @@ function renderO1() {
 }
 async function saveSelectionNeed(nextNeed) {
   try {
-    if (state.sessionId && apiClient.isConfigured) {
-      await apiClient.updateSelectionSession(state.sessionId, apiNeed(nextNeed), readPreferenceEvidence());
-    }
-    state.need = nextNeed;
-    Object.assign(state, GuanchaAdapters.invalidateDecisionState(state));
+    const transition = await GuanchaAdapters.prepareNeedUpdate({
+      state, nextNeed, isApiConfigured: apiClient.isConfigured,
+      updateRemote: () => apiClient.updateSelectionSession(state.sessionId, apiNeed(nextNeed), readPreferenceEvidence()),
+    });
+    Object.assign(state, transition);
     state.overlay = null;
     state.screen = 'candidates';
     saveState(); render(); showToast('本次需求已更新，请重新分析候选茶');

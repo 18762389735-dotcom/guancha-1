@@ -42,9 +42,24 @@
       candidates: (state.candidates || []).map((candidate) => ({ ...candidate, decision: null, riskFlags: [] })),
     };
   }
+  async function prepareNeedUpdate({ state = {}, nextNeed = {}, isApiConfigured = false, updateRemote }) {
+    if (state.sessionId) {
+      if (!isApiConfigured) {
+        const error = new Error('API is not configured for the existing selection session');
+        error.code = 'api_not_configured';
+        throw error;
+      }
+      await updateRemote();
+    }
+    return { ...invalidateDecisionState(state), need: nextNeed };
+  }
   function activeRecoveryScreen(snapshot = {}) {
     if (snapshot.decision_delta) return 'rejudge';
     if (['queued', 'processing'].includes(snapshot.rejudge_job?.status)) return 'rejudge';
+    const decisionJobStatus = snapshot.session_decision_job?.status;
+    if (['queued', 'processing'].includes(decisionJobStatus)) return 'analysis';
+    if (decisionJobStatus === 'completed' && snapshot.current_decision_id) return 'result';
+    if (['failed', 'stale'].includes(decisionJobStatus)) return 'candidates';
     const hasActiveAnalysis = (snapshot.candidates || []).some((candidate) => {
       if (['queued', 'processing'].includes(candidate.current_extraction?.status)) return true;
       return (candidate.images || []).some((image) => ['queued', 'processing'].includes(image.current_job_status || image.status));
@@ -90,5 +105,5 @@
     if (preferenceReference.length) lines.push(`${preferenceReference.map((item) => item.text).join('')}这只作为低置信口味参考，不会覆盖你这次的需求。`);
     return { lines, preferenceReference };
   }
-  global.GuanchaAdapters = { actionLabels, jobToCandidateStatus, candidateToViewModel, sensoryNeedMatch, invalidateDecisionState, activeRecoveryScreen, buildPreferenceReference, buildPersonalFitPresentation };
+  global.GuanchaAdapters = { actionLabels, jobToCandidateStatus, candidateToViewModel, sensoryNeedMatch, invalidateDecisionState, prepareNeedUpdate, activeRecoveryScreen, buildPreferenceReference, buildPersonalFitPresentation };
 }(window));

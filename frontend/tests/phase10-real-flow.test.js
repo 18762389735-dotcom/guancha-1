@@ -157,8 +157,8 @@ test('Need edits update the server before clearing stale decision and returning 
   const end = source.indexOf('function drinkGroup(', start);
   const implementation = source.slice(start, end);
   assert.ok(start >= 0 && end > start);
-  assert.ok(implementation.indexOf('await apiClient.updateSelectionSession') < implementation.indexOf('state.need = nextNeed'));
-  assert.match(implementation, /GuanchaAdapters\.invalidateDecisionState\(state\)/);
+  assert.match(implementation, /await GuanchaAdapters\.prepareNeedUpdate/);
+  assert.ok(implementation.indexOf('await GuanchaAdapters.prepareNeedUpdate') < implementation.indexOf('Object.assign(state, transition)'));
   assert.match(implementation, /state\.screen = 'candidates'/);
 });
 

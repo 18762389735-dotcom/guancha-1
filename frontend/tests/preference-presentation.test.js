@@ -78,3 +78,43 @@ test('server snapshot recovers active analysis and completed rejudge screens', (
   assert.equal(api.activeRecoveryScreen({ candidates: [], current_decision_id: 'v1' }), 'result');
   assert.equal(api.activeRecoveryScreen({ candidates: [] }), 'candidates');
 });
+
+test('remote Need transition requires configuration and a successful PATCH', async () => {
+  const api = adapters();
+  const original = {
+    sessionId: 'session-1', need: { taste: 'old' }, decisionVersionId: 'v1',
+    candidates: [{ id: 'a', extraction: { id: 'e1' }, decision: { overall_order: 1 } }],
+  };
+  let calls = 0;
+  await assert.rejects(() => api.prepareNeedUpdate({
+    state: original, nextNeed: { taste: 'new' }, isApiConfigured: false,
+    updateRemote: async () => { calls += 1; },
+  }), error => error.code === 'api_not_configured');
+  await assert.rejects(() => api.prepareNeedUpdate({
+    state: original, nextNeed: { taste: 'new' }, isApiConfigured: true,
+    updateRemote: async () => { calls += 1; throw Object.assign(new Error('offline'), { code: 'network_error' }); },
+  }), error => error.code === 'network_error');
+  assert.equal(calls, 1);
+  assert.equal(original.need.taste, 'old');
+  assert.equal(original.decisionVersionId, 'v1');
+});
+
+test('local first Need can save without an API session', async () => {
+  const api = adapters();
+  const transition = await api.prepareNeedUpdate({
+    state: { sessionId: null, need: { taste: 'old' }, candidates: [] },
+    nextNeed: { taste: 'new' }, isApiConfigured: false,
+    updateRemote: async () => { throw new Error('must not call'); },
+  });
+  assert.equal(transition.need.taste, 'new');
+  assert.equal(transition.decisionVersionId, null);
+});
+
+test('current session Decision Job controls recovery without local job state', () => {
+  const api = adapters();
+  assert.equal(api.activeRecoveryScreen({ candidates: [], session_decision_job: { status: 'queued' } }), 'analysis');
+  assert.equal(api.activeRecoveryScreen({ candidates: [], session_decision_job: { status: 'processing' } }), 'analysis');
+  assert.equal(api.activeRecoveryScreen({ candidates: [], current_decision_id: 'v1', session_decision_job: { status: 'completed' } }), 'result');
+  assert.equal(api.activeRecoveryScreen({ candidates: [], session_decision_job: { status: 'failed' } }), 'candidates');
+  assert.equal(api.activeRecoveryScreen({ candidates: [], session_decision_job: { status: 'stale' } }), 'candidates');
+});
