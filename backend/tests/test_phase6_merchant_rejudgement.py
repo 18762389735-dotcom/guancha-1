@@ -333,9 +333,14 @@ async def test_unrelated_reply_preserves_v1_bounded_preference_component_and_ran
         async def fail_aggregate_merchant_rejudgement(self, **kwargs):
             raise AssertionError(f"rejudge unexpectedly failed: {kwargs}")
 
+    class ThrowingSink:
+        def emit_server(self, **kwargs):
+            raise RuntimeError("telemetry unavailable")
+
     repository = RepositoryStub()
-    await MerchantReplyService(repository=repository).run_rejudge(
+    await MerchantReplyService(repository=repository, event_sink=ThrowingSink()).run_rejudge(
         job_id=uuid4(), reply_id=reply_id, client_id=uuid4(), fingerprint="bounded-preference",
+        analytics_session_id=uuid4(),
     )
 
     decisions = repository.completed["decisions"]

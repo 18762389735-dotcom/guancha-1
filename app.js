@@ -5,6 +5,7 @@ const cameraInput = document.querySelector('#camera-input');
 const candidateImageInput = document.querySelector('#candidate-image-input');
 let activeCameraStream = null;
 let lastRenderedScreen = null;
+let lastResultAnalyticsEdge = null;
 
 const STORAGE_KEY = 'guancha-prototype-v2';
 const DRINKS = {
@@ -704,6 +705,17 @@ function selectedDrinkCount(key) { return state.o1[key]?.length || 0; }
 function hasAnyO1() { return Object.values(state.o1).some(items => items.length); }
 function currentCandidate() { return state.candidates[state.activeCandidate] || null; }
 function isRejudged() { return state.screen === 'rejudge'; }
+function trackResultView() {
+  if (!['result', 'rejudge'].includes(state.screen)) return false;
+  const edge = [state.screen, currentCandidate()?.serverCandidateId || currentCandidate()?.id || 'none', state.decisionVersionId || 'none'].join(':');
+  if (edge === lastResultAnalyticsEdge) return false;
+  lastResultAnalyticsEdge = edge;
+  return productAnalytics.track('candidate_result_viewed', {
+    candidate_id: currentCandidate()?.serverCandidateId,
+    decision_version_id: state.decisionVersionId || undefined,
+    metadata: { candidate_count: state.candidates.length, screen: state.screen },
+  });
+}
 
 function render() {
   // Most interactions re-render the current screen so that selected states
@@ -739,13 +751,7 @@ function render() {
   };
   app.innerHTML = (templates[state.screen] || renderHome)() + renderOverlay();
   lastRenderedScreen = state.screen;
-  if (['result', 'rejudge'].includes(state.screen) && !preserveScroll) {
-    productAnalytics.track('candidate_result_viewed', {
-      candidate_id: currentCandidate()?.serverCandidateId,
-      decision_version_id: state.decisionVersionId || undefined,
-      metadata: { candidate_count: state.candidates.length, screen: state.screen },
-    });
-  }
+  if (!preserveScroll) trackResultView();
   if (preserveScroll && previousScrollTop > 0) {
     requestAnimationFrame(() => {
       const page = app.querySelector('.page');
@@ -1380,9 +1386,9 @@ document.addEventListener('click', event => {
   if (action === 'ask') return openFollowupQuestions();
   if (action === 'update-merchant-judgement') return updateMerchantJudgement();
   if (action === 'copy-question') { const item = merchantQuestions(currentCandidate())[Number(target.dataset.index)]; if (item) productAnalytics.track('merchant_question_copied', { candidate_id: currentCandidate()?.serverCandidateId, decision_version_id: state.decisionVersionId || undefined, metadata: { question_field: item.field_key || 'unknown', question_count: 1, screen: state.screen } }); return item?.question && copyText(item.question); }
-  if (action === 'copy-all') { const questions = merchantQuestions(currentCandidate()); productAnalytics.track('merchant_question_copied', { candidate_id: currentCandidate()?.serverCandidateId, decision_version_id: state.decisionVersionId || undefined, metadata: { question_count: questions.length, action_bucket: 'copy_all', screen: state.screen } }); return copyText(questions.map((item,index)=>`${index+1}. ${item.question}`).join('\n')); }
-  if (action === 'slide-prev') { slide(-1); return productAnalytics.track('candidate_result_viewed', { candidate_id: currentCandidate()?.serverCandidateId, decision_version_id: state.decisionVersionId || undefined, metadata: { candidate_count: state.candidates.length, screen: state.screen } }); }
-  if (action === 'slide-next') { slide(1); return productAnalytics.track('candidate_result_viewed', { candidate_id: currentCandidate()?.serverCandidateId, decision_version_id: state.decisionVersionId || undefined, metadata: { candidate_count: state.candidates.length, screen: state.screen } }); }
+  if (action === 'copy-all') { const questions = merchantQuestions(currentCandidate()); productAnalytics.track('merchant_question_copied', { candidate_id: currentCandidate()?.serverCandidateId, decision_version_id: state.decisionVersionId || undefined, metadata: { question_count: questions.length, source: 'copy_all', screen: state.screen } }); return copyText(questions.map((item,index)=>`${index+1}. ${item.question}`).join('\n')); }
+  if (action === 'slide-prev') { slide(-1); return trackResultView(); }
+  if (action === 'slide-next') { slide(1); return trackResultView(); }
   if (action === 'back-from-result') return setScreen('candidates');
   if (action === 'confirm-choice') { productAnalytics.track('candidate_selected', { candidate_id: currentCandidate()?.serverCandidateId, decision_version_id: state.decisionVersionId || undefined, metadata: { action_bucket: currentCandidate()?.decision?.action_bucket || 'unknown', screen: state.screen } }); return setScreen('ownership'); }
   if (action === 'back-from-ownership') return setScreen('candidates');

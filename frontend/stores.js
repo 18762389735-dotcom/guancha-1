@@ -27,36 +27,56 @@
       return { ...clone(fallback), ...payload, schemaVersion: version };
     };
   }
-  const merchantReplyPersistedFields = Object.freeze([
-    'id', 'selection_session_id', 'decision_version_id', 'followup_question_id',
-    'candidate_id', 'status', 'processing_status', 'parse_status', 'created_at', 'updated_at',
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const replyStatus = new Set(['submitted', 'parsed', 'failed']);
+  const processingStatus = new Set(['queued', 'processing', 'completed', 'failed']);
+  const parseStatus = new Set(['answered', 'partially-answered', 'evasive', 'not-answered', 'conflicting']);
+  const selectionFields = Object.freeze([
+    'sessionId', 'candidates', 'need', 'decisionVersionId', 'decisionJobId', 'decisionStatus',
+    'selectionAnswer', 'followupQuestions', 'questionStatus', 'questionDecisionVersionId',
+    'merchantReplyIds', 'merchantReplies', 'rejudgeJobId', 'lastDecisionDelta', 'deltaStatus', 'jobIds',
   ]);
+  function isIsoTimestamp(value) { return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value) && Number.isFinite(Date.parse(value)); }
+  function sanitizedReply(reply) {
+    if (!reply || typeof reply !== 'object' || Array.isArray(reply)) return null;
+    const cleaned = {};
+    for (const field of ['id', 'selection_session_id', 'decision_version_id', 'followup_question_id', 'candidate_id']) {
+      if (typeof reply[field] === 'string' && uuidPattern.test(reply[field])) cleaned[field] = reply[field];
+    }
+    if (replyStatus.has(reply.status)) cleaned.status = reply.status;
+    if (processingStatus.has(reply.processing_status)) cleaned.processing_status = reply.processing_status;
+    if (parseStatus.has(reply.parse_status)) cleaned.parse_status = reply.parse_status;
+    for (const field of ['created_at', 'updated_at']) if (isIsoTimestamp(reply[field])) cleaned[field] = reply[field];
+    return Object.keys(cleaned).length ? cleaned : null;
+  }
   function persistedMerchantReplies(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-    return Object.fromEntries(Object.entries(value).map(([questionId, reply]) => {
-      if (!reply || typeof reply !== 'object' || Array.isArray(reply)) return [questionId, {}];
-      return [questionId, Object.fromEntries(
-        merchantReplyPersistedFields
-          .filter((field) => reply[field] !== undefined && reply[field] !== null)
-          .map((field) => [field, reply[field]])
-      )];
+    return Object.fromEntries(Object.entries(value).flatMap(([questionId, reply]) => {
+      const cleaned = uuidPattern.test(questionId) ? sanitizedReply(reply) : null;
+      return cleaned ? [[questionId, cleaned]] : [];
     }));
+  }
+  function persistedMerchantReplyIds(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    return Object.fromEntries(Object.entries(value).filter(([questionId, replyId]) => uuidPattern.test(questionId) && typeof replyId === 'string' && uuidPattern.test(replyId)));
   }
   function selectionBridgeStore() {
     const key = 'guancha.selection-bridge.v1';
     const version = 2;
     function sanitize(value) {
-      const payload = value && typeof value === 'object' && !Array.isArray(value) ? { ...value } : {};
-      delete payload.schemaVersion;
-      payload.reply = '';
-      payload.merchantReplies = persistedMerchantReplies(payload.merchantReplies);
+      const input = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+      const payload = Object.fromEntries(selectionFields.filter(field => input[field] !== undefined).map(field => [field, clone(input[field])]));
+      payload.merchantReplyIds = persistedMerchantReplyIds(input.merchantReplyIds);
+      payload.merchantReplies = persistedMerchantReplies(input.merchantReplies);
       return { schemaVersion: version, ...payload };
     }
     return {
       key,
       load(fallback) {
-        const raw = safeRead(key, null);
-        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return clone(fallback);
+        let raw;
+        try { raw = JSON.parse(global.localStorage.getItem(key)); }
+        catch { global.localStorage.removeItem(key); return clone(fallback); }
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) { global.localStorage.removeItem(key); return clone(fallback); }
         const cleaned = sanitize(raw);
         // Reading legacy state is itself a privacy migration: the backing
         // localStorage value must no longer retain merchant free text.

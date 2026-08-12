@@ -9,7 +9,7 @@ from guancha_api.domain.tieguanyin.rules.rule_schema import load_approved_rules
 from guancha_api.repositories.postgres import PostgresPhase2Repository, StoredJob
 from guancha_api.schemas.contracts import CreateMerchantReplyRequest, ErrorCode, MerchantReply
 from guancha_api.providers.merchant_reply import FakeMerchantReplyReasoningProvider, MerchantReplyReasoningProvider
-from guancha_api.product_events import ProductEventSink
+from guancha_api.product_events import ProductEventSink, safe_emit_server
 
 
 class MerchantReplyService:
@@ -18,14 +18,17 @@ class MerchantReplyService:
         self.provider = provider or FakeMerchantReplyReasoningProvider()
         self.event_sink = event_sink
 
-    async def submit(self, *, session_id: UUID, client_id: UUID, idempotency_key: UUID, request: CreateMerchantReplyRequest) -> MerchantReply:
-        row, _ = await self.repository.create_or_replay_merchant_reply(
+    async def submit(self, *, session_id: UUID, client_id: UUID, idempotency_key: UUID, request: CreateMerchantReplyRequest, analytics_session_id: UUID | None = None) -> MerchantReply:
+        row, created = await self.repository.create_or_replay_merchant_reply(
             reply_id=uuid4(), session_id=session_id, client_id=client_id,
             decision_version_id=request.decision_version_id, followup_question_id=request.followup_question_id,
             idempotency_key=idempotency_key,
             request_hash=request_hash({"session_id": str(session_id), **request.model_dump(mode="json")}), raw_text=request.raw_text,
         )
-        return self._dto(row)
+        result = self._dto(row)
+        if created and self.event_sink:
+            safe_emit_server(self.event_sink, event_name="merchant_reply_submitted", resource_id=result.id, anonymous_session_id=analytics_session_id, candidate_id=result.candidate_id, decision_version_id=result.decision_version_id)
+        return result
 
     async def get(self, *, reply_id: UUID, client_id: UUID) -> MerchantReply:
         return self._dto(await self.repository.get_merchant_reply_for_client(reply_id=reply_id, client_id=client_id))
@@ -48,6 +51,8 @@ class MerchantReplyService:
                 job_id=job.id,
                 task=lambda: self.run_rejudge(job_id=job.id, reply_id=reply_id, client_id=client_id, fingerprint=fingerprint, analytics_session_id=analytics_session_id),
             )
+            if self.event_sink:
+                safe_emit_server(self.event_sink, event_name="rejudge_started", resource_id=job.id, anonymous_session_id=analytics_session_id, stage="queued", metadata={"processing_mode": job.processing_mode.value if job.processing_mode else "test-fixture"})
         return job
 
     async def run_rejudge(self, *, job_id: UUID, reply_id: UUID, client_id: UUID, fingerprint: str, analytics_session_id: UUID | None = None) -> None:
@@ -117,13 +122,13 @@ class MerchantReplyService:
                 reply_ids=tuple(reply["id"] for reply in replies), version_id=version_id, decisions=decisions,
                 delta=delta, input_fingerprint=fingerprint,
             )
-            if self.event_sink:
-                self.event_sink.emit_server(event_name="rejudge_completed", resource_id=job_id, anonymous_session_id=analytics_session_id, decision_version_id=version_id, stage="completed")
         except Exception:
             await self.repository.fail_aggregate_merchant_rejudgement(job_id=job_id, error_code=ErrorCode.AI_SCHEMA_INVALID)
             if self.event_sink:
-                self.event_sink.emit_server(event_name="rejudge_failed", resource_id=job_id, anonymous_session_id=analytics_session_id, stage="failed", error_category=ErrorCode.AI_SCHEMA_INVALID.value, metadata={"failure_category": "REJUDGE_INCONSISTENT"})
+                safe_emit_server(self.event_sink, event_name="rejudge_failed", resource_id=job_id, anonymous_session_id=analytics_session_id, stage="failed", error_category=ErrorCode.AI_SCHEMA_INVALID.value, metadata={"failure_category": "REJUDGE_INCONSISTENT"})
             raise
+        if self.event_sink:
+            safe_emit_server(self.event_sink, event_name="rejudge_completed", resource_id=job_id, anonymous_session_id=analytics_session_id, decision_version_id=version_id, stage="completed")
 
     async def parse(self, *, reply_id: UUID, client_id: UUID, analytics_session_id: UUID | None = None) -> None:
         claimed = await self.repository.claim_merchant_reply_for_parse(reply_id=reply_id, client_id=client_id)
@@ -137,15 +142,15 @@ class MerchantReplyService:
             await self.repository.persist_merchant_reply_parse(
                 reply_id=reply_id, client_id=client_id, parsed_status=parsed.reply_status, claims=parsed.claims
             )
-            if self.event_sink and parsed.reply_status in {"evasive", "not-answered", "partially-answered"}:
-                self.event_sink.emit_server(
-                    event_name="merchant_reply_unusable", resource_id=reply_id,
-                    anonymous_session_id=analytics_session_id,
-                    candidate_id=reply.get("candidate_id"), decision_version_id=reply.get("decision_version_id"),
-                )
         except Exception:
             await self.repository.fail_merchant_reply_parse(reply_id=reply_id, client_id=client_id)
             raise
+        if self.event_sink and parsed.reply_status in {"evasive", "not-answered", "partially-answered"}:
+            safe_emit_server(
+                self.event_sink, event_name="merchant_reply_unusable", resource_id=reply_id,
+                anonymous_session_id=analytics_session_id,
+                candidate_id=reply.get("candidate_id"), decision_version_id=reply.get("decision_version_id"),
+            )
 
     @staticmethod
     def _dto(row: dict[str, object]) -> MerchantReply:

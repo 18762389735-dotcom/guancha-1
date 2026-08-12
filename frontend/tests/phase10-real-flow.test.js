@@ -169,3 +169,10 @@ test('active snapshot recovery uses server job status and preserves rejudge delt
   assert.match(source, /state\.screen = recoveryScreen/);
   assert.doesNotMatch(source, /state\.screen === 'analysis' \|\| state\.screen === 'candidates'\) state\.screen = 'result'/);
 });
+
+test('result analytics is guarded by the screen candidate decision transition edge', () => {
+  const source = fs.readFileSync(path.resolve(root, '..', 'app.js'), 'utf8');
+  assert.match(source, /const edge = \[state\.screen, currentCandidate\(\)\?\.serverCandidateId \|\| currentCandidate\(\)\?\.id \|\| 'none', state\.decisionVersionId \|\| 'none'\]\.join/);
+  assert.match(source, /if \(edge === lastResultAnalyticsEdge\) return false/);
+  assert.match(source, /if \(action === 'slide-next'\) \{ slide\(1\); return trackResultView\(\); \}/);
+});

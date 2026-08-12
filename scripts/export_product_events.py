@@ -3,7 +3,13 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "backend" / "src"))
+
+from guancha_api.product_events import validate_stored_event
 
 
 COLUMNS = (
@@ -19,8 +25,8 @@ def read_events(path: Path) -> list[dict[str, object]]:
     seen: set[str] = set(); records: list[dict[str, object]] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         try:
-            source = json.loads(line)
-            if not isinstance(source, dict) or not isinstance(source.get("event_id"), str):
+            source = validate_stored_event(json.loads(line))
+            if source is None:
                 continue
             if source["event_id"] in seen:
                 continue
@@ -32,12 +38,19 @@ def read_events(path: Path) -> list[dict[str, object]]:
     return sorted(records, key=lambda row: (str(row.get("occurred_at", "")), str(row["event_id"])))
 
 
+def _csv_safe(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    cleaned = value.replace("\r", " ").replace("\n", " ")
+    return "'" + cleaned if cleaned.startswith(("=", "+", "-", "@")) else cleaned
+
+
 def export(source: Path, destination: Path) -> int:
     rows = read_events(source)
     destination.parent.mkdir(parents=True, exist_ok=True)
     with destination.open("w", newline="", encoding="utf-8-sig") as handle:
         writer = csv.DictWriter(handle, fieldnames=COLUMNS, extrasaction="ignore")
-        writer.writeheader(); writer.writerows(rows)
+        writer.writeheader(); writer.writerows({key: _csv_safe(value) for key, value in row.items()} for row in rows)
     return len(rows)
 
 

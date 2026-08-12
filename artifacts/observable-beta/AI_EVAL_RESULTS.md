@@ -1,6 +1,6 @@
 # AI Eval Results
 
-Run at: 2026-08-12T18:10:11.978097+00:00
+Run at: 2026-08-12T18:28:28.283541+00:00
 
 This is the fixed deterministic/fixture test-set result, not real-world model accuracy.
 No Provider network call or API key access is performed.

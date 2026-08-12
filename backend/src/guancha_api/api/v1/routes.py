@@ -11,7 +11,7 @@ from guancha_api.application.merchant_reply_service import MerchantReplyService
 from guancha_api.application.answer_contract import build_selection_answer
 from guancha_api.repositories.idempotency import request_hash
 from guancha_api.schemas.contracts import BrewFeedbackAnalysisRequest, BrewFeedbackAnalysisResponse
-from guancha_api.product_events import CLIENT_EVENT_NAMES, ClientProductEvent, parse_analytics_session
+from guancha_api.product_events import CLIENT_EVENT_NAMES, ClientProductEvent, parse_analytics_session, safe_emit_client, safe_emit_server
 
 from guancha_api.core.errors import ApiErrorResponse
 from guancha_api.schemas.contracts import (
@@ -71,7 +71,7 @@ IdempotencyKey = Annotated[UUID, Depends(require_idempotency_key)]
 AnalyticsSession = Annotated[str | None, Header(alias="X-Analytics-Session-Id")]
 
 def _emit(raw: Request, *, event_name: str, resource_id: UUID, analytics_session: str | None, **fields: object) -> None:
-    raw.app.state.product_event_sink.emit_server(
+    safe_emit_server(raw.app.state.product_event_sink,
         event_name=event_name, resource_id=resource_id,
         anonymous_session_id=parse_analytics_session(analytics_session), **fields,
     )
@@ -80,7 +80,7 @@ def _emit(raw: Request, *, event_name: str, resource_id: UUID, analytics_session
 async def create_product_event(event: ClientProductEvent, raw: Request) -> dict[str, str]:
     if event.event_name not in CLIENT_EVENT_NAMES:
         raise HTTPException(status_code=422, detail="validation_error")
-    raw.app.state.product_event_sink.emit_client(event)
+    safe_emit_client(raw.app.state.product_event_sink, event)
     return {"status": "accepted"}
 
 def _repo(request: Request):
@@ -266,7 +266,6 @@ async def analyze_selection_session(session_id: UUID, client_id: ClientId, idemp
         return result
     job = await _decision_service(raw).analyze(session_id=session_id, client_id=client_id, idempotency_key=idempotency_key, task_runner=raw.app.state.task_runner, analytics_session_id=parse_analytics_session(x_analytics_session_id))
     result = _job(job)
-    _emit(raw, event_name="analysis_started", resource_id=result.id, analytics_session=x_analytics_session_id, stage=result.stage.value, metadata={"processing_mode": result.processing_mode.value})
     return result
 
 def _decision(version, decisions):
@@ -291,15 +290,12 @@ async def get_followup_questions(version_id: UUID, client_id: ClientId, raw: Req
 
 @router.post("/selection-sessions/{session_id}/merchant-replies", response_model=MerchantReply, status_code=201)
 async def create_merchant_reply(session_id: UUID, request: CreateMerchantReplyRequest, client_id: ClientId, idempotency_key: IdempotencyKey, raw: Request, x_analytics_session_id: AnalyticsSession = None) -> MerchantReply:
-    result = await _merchant_reply_service(raw).submit(session_id=session_id, client_id=client_id, idempotency_key=idempotency_key, request=request)
-    _emit(raw, event_name="merchant_reply_submitted", resource_id=result.id, analytics_session=x_analytics_session_id, candidate_id=result.candidate_id, decision_version_id=result.decision_version_id)
+    result = await _merchant_reply_service(raw).submit(session_id=session_id, client_id=client_id, idempotency_key=idempotency_key, request=request, analytics_session_id=parse_analytics_session(x_analytics_session_id))
     return result
 
 @router.get("/merchant-replies/{reply_id}", response_model=MerchantReply)
 async def get_merchant_reply(reply_id: UUID, client_id: ClientId, raw: Request, x_analytics_session_id: AnalyticsSession = None) -> MerchantReply:
     result = await _merchant_reply_service(raw).get(reply_id=reply_id, client_id=client_id)
-    if result.parse_status in {"evasive", "not-answered", "partially-answered"}:
-        _emit(raw, event_name="merchant_reply_unusable", resource_id=result.id, analytics_session=x_analytics_session_id, candidate_id=result.candidate_id, decision_version_id=result.decision_version_id)
     return result
 
 @router.post("/selection-sessions/{session_id}/rejudge", response_model=AnalysisJobResponse, status_code=201)
@@ -310,7 +306,6 @@ async def rejudge_merchant_reply(session_id: UUID, request: CreateRejudgeRequest
         analytics_session_id=parse_analytics_session(x_analytics_session_id),
     )
     result = _job(job)
-    _emit(raw, event_name="rejudge_started", resource_id=result.id, analytics_session=x_analytics_session_id, stage=result.stage.value, metadata={"processing_mode": result.processing_mode.value})
     return result
 
 @router.get("/decision-deltas/{delta_id}", response_model=DecisionDelta)

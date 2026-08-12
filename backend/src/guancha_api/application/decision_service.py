@@ -7,7 +7,7 @@ from guancha_api.domain.tieguanyin.decision import evaluate_candidate, rank_with
 from guancha_api.domain.tieguanyin.rules.rule_schema import load_approved_rules
 from guancha_api.repositories.idempotency import request_hash
 from guancha_api.repositories.postgres import PostgresPhase2Repository, StoredJob
-from guancha_api.product_events import ProductEventSink
+from guancha_api.product_events import ProductEventSink, safe_emit_server
 
 
 class SessionDecisionService:
@@ -33,6 +33,8 @@ class SessionDecisionService:
         )
         if created:
             await task_runner.enqueue(job_id=job.id, task=lambda: self.run(job_id=job.id, session_id=session_id, client_id=client_id, fingerprint=fingerprint, need_snapshot=need_snapshot, inputs_snapshot=inputs, recent_preference_evidence=recent_preference_evidence, analytics_session_id=analytics_session_id))
+            if self.event_sink:
+                safe_emit_server(self.event_sink, event_name="analysis_started", resource_id=job.id, anonymous_session_id=analytics_session_id, stage="queued", metadata={"processing_mode": job.processing_mode.value if job.processing_mode else "test-fixture"})
         return job
 
     async def run(self, *, job_id: UUID, session_id: UUID, client_id: UUID, fingerprint: str, need_snapshot: dict[str, object], inputs_snapshot: list[dict[str, object]], recent_preference_evidence: list[dict[str, object]] | None = None, analytics_session_id: UUID | None = None) -> None:
@@ -52,11 +54,11 @@ class SessionDecisionService:
                     "score_components": draft.score_components, "internal_score": draft.internal_score})
             version_id = uuid4()
             await self.repository.complete_session_decision_job(job_id=job_id, session_id=session_id, client_id=client_id, version_id=version_id, rule_version="v1", input_fingerprint=fingerprint, decisions=decisions)
-            if self.event_sink:
-                self.event_sink.emit_server(event_name="analysis_completed", resource_id=job_id, anonymous_session_id=analytics_session_id, decision_version_id=version_id, stage="completed")
         except Exception:
             from guancha_api.schemas.contracts import ErrorCode
             await self.repository.fail_session_decision_job(job_id=job_id, error_code=ErrorCode.AI_SCHEMA_INVALID)
             if self.event_sink:
-                self.event_sink.emit_server(event_name="analysis_failed", resource_id=job_id, anonymous_session_id=analytics_session_id, stage="failed", error_category=ErrorCode.AI_SCHEMA_INVALID.value, metadata={"failure_category": "PROVIDER_ERROR"})
+                safe_emit_server(self.event_sink, event_name="analysis_failed", resource_id=job_id, anonymous_session_id=analytics_session_id, stage="failed", error_category=ErrorCode.AI_SCHEMA_INVALID.value, metadata={"failure_category": "PROVIDER_ERROR"})
             raise
+        if self.event_sink:
+            safe_emit_server(self.event_sink, event_name="analysis_completed", resource_id=job_id, anonymous_session_id=analytics_session_id, decision_version_id=version_id, stage="completed")
