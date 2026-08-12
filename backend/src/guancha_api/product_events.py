@@ -96,19 +96,22 @@ class ProductEventSink:
     ) -> bool:
         if event_name not in SERVER_EVENT_NAMES or anonymous_session_id is None:
             return False
-        safe_metadata = EventMetadata.model_validate(metadata or {})
-        event_id = uuid5(NAMESPACE_URL, f"guancha:event:v1:{event_name}:{resource_id}")
-        return self._write({
-            "schema_version": 1, "event_id": str(event_id), "event_name": event_name,
-            "anonymous_session_id": str(anonymous_session_id),
-            "occurred_at": datetime.now(timezone.utc).isoformat(),
-            "flow_id": str(flow_id) if flow_id else None,
-            "candidate_id": str(candidate_id) if candidate_id else None,
-            "decision_version_id": str(decision_version_id) if decision_version_id else None,
-            "stage": stage, "duration_ms": None, "error_category": error_category,
-            "metadata": safe_metadata.model_dump(mode="json", exclude_none=True),
-            "authority": "server", "received_at": datetime.now(timezone.utc).isoformat(),
-        })
+        try:
+            safe_metadata = EventMetadata.model_validate(metadata or {})
+            event_id = uuid5(NAMESPACE_URL, f"guancha:event:v1:{event_name}:{resource_id}")
+            return self._write({
+                "schema_version": 1, "event_id": str(event_id), "event_name": event_name,
+                "anonymous_session_id": str(anonymous_session_id),
+                "occurred_at": datetime.now(timezone.utc).isoformat(),
+                "flow_id": str(flow_id) if flow_id else None,
+                "candidate_id": str(candidate_id) if candidate_id else None,
+                "decision_version_id": str(decision_version_id) if decision_version_id else None,
+                "stage": stage, "duration_ms": None, "error_category": error_category,
+                "metadata": safe_metadata.model_dump(mode="json", exclude_none=True),
+                "authority": "server", "received_at": datetime.now(timezone.utc).isoformat(),
+            })
+        except Exception:
+            return False
 
     def _write(self, record: dict[str, object]) -> bool:
         try:

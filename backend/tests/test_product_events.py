@@ -63,3 +63,4 @@ def test_server_event_ids_are_deterministic_and_sink_is_fail_open(tmp_path) -> N
     directory_path = tmp_path / "directory-instead-of-log"; directory_path.mkdir()
     failing_sink = ProductEventSink(directory_path)
     assert failing_sink.emit_server(event_name="analysis_failed", resource_id=uuid4(), anonymous_session_id=session_id) is False
+    assert sink.emit_server(event_name="analysis_failed", resource_id=uuid4(), anonymous_session_id=session_id, metadata={"raw_text": "private"}) is False

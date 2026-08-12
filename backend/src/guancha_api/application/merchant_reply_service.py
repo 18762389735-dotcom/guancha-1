@@ -61,7 +61,7 @@ class MerchantReplyService:
             )
             for saved in replies:
                 if saved["processing_status"] == "queued":
-                    await self.parse(reply_id=saved["id"], client_id=client_id)
+                    await self.parse(reply_id=saved["id"], client_id=client_id, analytics_session_id=analytics_session_id)
             reply_context, parent, inputs, replies, all_claims = await self.repository.merchant_rejudgement_batch(
                 anchor_reply_id=reply_id, client_id=client_id
             )
@@ -125,7 +125,7 @@ class MerchantReplyService:
                 self.event_sink.emit_server(event_name="rejudge_failed", resource_id=job_id, anonymous_session_id=analytics_session_id, stage="failed", error_category=ErrorCode.AI_SCHEMA_INVALID.value, metadata={"failure_category": "REJUDGE_INCONSISTENT"})
             raise
 
-    async def parse(self, *, reply_id: UUID, client_id: UUID) -> None:
+    async def parse(self, *, reply_id: UUID, client_id: UUID, analytics_session_id: UUID | None = None) -> None:
         claimed = await self.repository.claim_merchant_reply_for_parse(reply_id=reply_id, client_id=client_id)
         if claimed is None:
             return
@@ -137,6 +137,12 @@ class MerchantReplyService:
             await self.repository.persist_merchant_reply_parse(
                 reply_id=reply_id, client_id=client_id, parsed_status=parsed.reply_status, claims=parsed.claims
             )
+            if self.event_sink and parsed.reply_status in {"evasive", "not-answered", "partially-answered"}:
+                self.event_sink.emit_server(
+                    event_name="merchant_reply_unusable", resource_id=reply_id,
+                    anonymous_session_id=analytics_session_id,
+                    candidate_id=reply.get("candidate_id"), decision_version_id=reply.get("decision_version_id"),
+                )
         except Exception:
             await self.repository.fail_merchant_reply_parse(reply_id=reply_id, client_id=client_id)
             raise
