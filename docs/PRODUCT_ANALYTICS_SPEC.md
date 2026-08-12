@@ -46,7 +46,7 @@ Current implementation covers the main funnel and resource mutations. `flow_aban
 
 Never record Need text, merchant raw text or summaries, screenshot/blob/base64 data, file path or hash, candidate/product names, phone/WeChat/name, arbitrary identifiers, IP/user-agent/URL, cookies, authorization headers, tokens/keys, database URLs, exception messages, or stack traces. Analytics data is distinct from business MerchantReply storage.
 
-The selection bridge persists only merchant reply IDs/status/timestamps. Loading a legacy bridge rewrites the backing localStorage value immediately to remove old free text.
+The top-level MerchantReply bridge path persists only reply IDs/status/timestamps and legacy reads rewrite that path. Independent re-review found that allowed complex selection fields can still carry nested MerchantReply raw/text/summary values; therefore the whole-bridge privacy boundary is implemented only partially and is not validated for Beta use.
 
 ## Operations
 
@@ -56,3 +56,5 @@ python scripts/summarize_product_funnel.py events.jsonl
 ```
 
 The exporter skips malformed lines, keeps the first occurrence of each `event_id`, sorts by occurrence time, and emits allowlisted columns only. The summary reports event counts, unique session counts, and raw sequential stage counts. It does not output percentages or statistical claims.
+
+Current validation status: implemented, not Beta-validated. Phase 2 replay can still duplicate raw JSONL/enqueue work, and export metadata validation can coerce invalid falsey/non-strict values. See `artifacts/observable-beta/PRIVACY_REVIEW.md`.

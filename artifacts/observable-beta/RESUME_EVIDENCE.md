@@ -9,7 +9,7 @@ Built a privacy-minimized observability and repeatable AI-evaluation layer for G
 ## Verifiable contributions
 
 - Defined a versioned client/server event contract with strict metadata allowlists, anonymous session-scoped identity, deterministic server event IDs, and fail-open delivery.
-- Removed legacy merchant free text from browser selection persistence through read-time in-place migration and write-time double filtering.
+- Added read-time migration and write-time filtering for the top-level MerchantReply persistence path; independent review found a remaining nested-complex-field bypass, so this is partial implementation evidence rather than a validated privacy claim.
 - Added an append-only standard-library JSONL sink, strict `POST /api/v1/events`, privacy-safe CSV export, and raw funnel summary without a database migration or analytics SDK.
 - Converted 27 documented AI cases into a machine-readable manifest and thin pytest runner covering Extraction fixtures, evidence boundaries, sensory translation, current Need, questions, merchant replies, rejudge/Delta, and Decision/Answer consistency.
 - Added a user-validation toolkit for 5–10 tea beginners: five hypotheses, task plan, observation rubric, interview guide, and metric definitions.
@@ -27,3 +27,4 @@ Built a privacy-minimized observability and repeatable AI-evaluation layer for G
 - Three database integration evals remain BLOCKED until an isolated PostgreSQL test database is supplied.
 - The fixed fixture pipeline begins after structured Extraction and does not validate live vision quality.
 - Deployment/privacy/readiness verdict belongs to the independent review artifacts, not this evidence note.
+- Independent final review verdict: Privacy FAIL / NO-GO and `NOT_READY_FOR_USER_VALIDATION`.
