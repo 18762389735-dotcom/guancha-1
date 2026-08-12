@@ -61,3 +61,10 @@ Date: 2026-08-13
 - After: active processing and completed Delta have distinct recovery paths.
 - Evidence: repository snapshot, adapter recovery helper, frontend resume function.
 - Tests: routing/recovery tests PASS; real browser and PostgreSQL E2E remain separate gates.
+
+## Recorded but not changed
+
+- Skip onboarding may still expose populated default O1/O2 as low-confidence preference references (P1).
+- Server candidate reorder may change the visible candidate because the numeric index, not candidate id, is preserved (P1).
+- Merchant reply overlay and unsubmitted textarea are not restored automatically (P1 audit finding; explicitly deprioritized in this repair).
+- At 390×568 the Home primary CTA begins below the initial viewport (P2); no horizontal overflow was observed at the audited larger viewports.

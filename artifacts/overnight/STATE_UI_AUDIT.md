@@ -43,6 +43,26 @@ Date: 2026-08-13
 - Impact: recoverable typing loss, no stored evidence or decision corruption.
 - Status: NOT FIXED by explicit scope choice.
 
+### UI-P1-03 — Skip retains default preference references
+
+- Initial state: user chooses “暂时跳过”.
+- Current behavior: populated default O1/O2 values remain available to personal-fit presentation.
+- Risk: the system can describe a preference the user never stated.
+- Status: NOT FIXED; independent audit finding outside the selected six repairs.
+
+### UI-P1-04 — Active candidate identity after reorder
+
+- Initial state: user is viewing a candidate by numeric carousel index.
+- Current behavior: server Decision order replaces the array while preserving the old index.
+- Risk: the visible candidate can change silently.
+- Status: NOT FIXED; independent audit finding outside the selected six repairs.
+
+### UI-P2-02 — Short mobile Home CTA
+
+- Viewport: 390×568.
+- Current behavior: primary start CTA begins below the initial viewport; fixed navigation is visible first.
+- Status: NOT FIXED; scroll remains possible and no horizontal overflow was observed.
+
 ## Responsive and browser limitation
 
-Automated tests cover routing and state helpers, not rendered 390/430 px browser geometry. Browser acceptance must report its own result; this document does not claim a visual PASS.
+Automated tests cover routing and state helpers, not rendered geometry. The read-only audit found no horizontal overflow at 390×844, 430×844, or 1280×900, but found the short-viewport CTA issue above. This is not a complete end-to-end browser PASS.

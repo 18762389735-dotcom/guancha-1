@@ -68,3 +68,36 @@ Scope: Competition MVP code, current-state documentation, fixtures, and automate
 - Evidence: overlays are intentionally saved as `null` and the reply draft is not part of the selection bridge.
 - Recommended minimal fix: defer; if implemented later, persist only a bounded local draft keyed by question id.
 - Status: NOT FIXED — outside the selected 3 P0 + 3 P1 scope.
+
+## GC-P1-04
+
+- Severity: P1
+- Screen / Flow: Skip onboarding → Result explanation
+- Observed behavior: skipped users still inherit default O1/O2 selections, so the page can describe preferences the user never supplied.
+- Expected behavior: skip means no preference reference; only the current Need should guide the explanation.
+- Why this matters: a fabricated personal reference weakens trust even when it is low confidence.
+- Evidence: read-only state audit; `defaultState` contains populated O1/O2 values and preference presentation reads them.
+- Recommended minimal fix: on skip, store empty O1/O2 or suppress preference references by onboarding status.
+- Status: NOT FIXED — outside the selected ceiling.
+
+## GC-P1-05
+
+- Severity: P1
+- Screen / Flow: Result carousel after server ordering
+- Observed behavior: `applySessionDecision` reorders candidates but preserves the numeric active index, so the visible candidate identity can change silently.
+- Expected behavior: preserve the active candidate id across server reorder.
+- Why this matters: a user reviewing candidate B can be moved to a different card without an explicit action.
+- Evidence: read-only state audit of the reorder path.
+- Recommended minimal fix: capture active candidate id before reorder and resolve its new index afterward.
+- Status: NOT FIXED — outside the selected ceiling.
+
+## GC-P2-02
+
+- Severity: P2
+- Screen / Flow: Home at 390×568
+- Observed behavior: the primary CTA is below the initial viewport while fixed navigation appears first.
+- Expected behavior: the core start action should be visible or clearly discoverable on short mobile screens.
+- Why this matters: adds first-use friction but does not block scrolling or corrupt the flow.
+- Evidence: read-only browser geometry audit; no horizontal overflow at 390×844, 430×844, or 1280×900.
+- Recommended minimal fix: evaluate only after Beta data; avoid an overnight layout rewrite.
+- Status: NOT FIXED — visual P2.

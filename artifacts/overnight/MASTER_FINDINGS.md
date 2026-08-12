@@ -12,11 +12,14 @@ Selected autonomous ceiling: exactly 3 P0 + 3 P1.
 | P1-B | P1 | Budget range used first number as ceiling | Common range/以内 parser uses upper bound | `a95a91d` | Parametrized tests PASS |
 | P1-C | P1 | Reload lost analysis/rejudge state | Snapshot job status + server-authoritative screen recovery | `9b95b77` | Pure/frontend tests PASS; DB/browser E2E not automated |
 
-## Deduplicated remaining issue
+## Deduplicated remaining issues
 
 | ID | Severity | Issue | Reason not fixed |
 |---|---|---|---|
-| P2-01 | P2 | Unsubmitted merchant textarea is lost on reload | Does not corrupt evidence or block the flow; outside selected ceiling |
+| REM-P1-01 | P1 | Skip onboarding can retain default O1/O2 preference references | Found by independent state audit after the six-item selection; outside ceiling |
+| REM-P1-02 | P1 | Server reorder preserves index rather than active candidate identity | Found by independent state audit after the six-item selection; outside ceiling |
+| REM-P1-03 | P1 | Merchant reply overlay/draft does not reopen automatically after reload | Explicitly deprioritized behind analysis and Delta recovery; no evidence corruption |
+| REM-P2-01 | P2 | 390×568 Home primary CTA starts below initial viewport | Visual friction, no horizontal overflow or hard blocker |
 
 ## Audit verdict before independent review
 
