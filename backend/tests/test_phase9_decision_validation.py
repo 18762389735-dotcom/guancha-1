@@ -93,9 +93,10 @@ def test_m4_explore_values_explicit_trial_evidence_without_erasing_risk() -> Non
     assert conflict.action_bucket is ActionBucket.NOT_RECOMMENDED_NOW
 
 
-def test_m5_marketing_claims_do_not_raise_sufficiency_or_lower_risk() -> None:
+@pytest.mark.parametrize("claim", ["兰花香", "核心产区", "大师制作", "高山茶", "传统工艺"])
+def test_m5_marketing_claims_do_not_raise_sufficiency_or_lower_risk(claim: str) -> None:
     baseline = _draft(evidence=_evidence(tea_type="tieguanyin", aroma_style=None, roast_level=None, season=None))
-    marketed = _draft(evidence=_evidence(tea_type="tieguanyin", aroma_style=None, roast_level=None, season=None, marketing_claims="master high-mountain"))
+    marketed = _draft(evidence=_evidence(tea_type="tieguanyin", aroma_style=None, roast_level=None, season=None, marketing_claims=claim))
     assert marketed.score_components["evidence_sufficiency"] == baseline.score_components["evidence_sufficiency"]
     assert marketed.action_bucket is baseline.action_bucket
 
@@ -291,11 +292,13 @@ def test_questions_only_offer_unknown_or_decision_relevant_fields() -> None:
     candidate_id = uuid4()
     version = {"need_snapshot": {"taste_text": "qingxiang"}, "rule_version": RULES[0].rule_version}
     decisions = [{"candidate_id": candidate_id, "missing_critical_fields": ["roast_level"], "action_bucket": "ask-before-buying", "overall_order": 1, "risk_flags": [], "reasons": []}]
-    inputs = [{"candidate_id": candidate_id, "extraction_version_id": uuid4(), "evidence": _evidence(tea_type="tieguanyin", aroma_style="qingxiang", roast_level=None, season="spring", price=None)}]
+    inputs = [{"candidate_id": candidate_id, "extraction_version_id": uuid4(), "evidence": _evidence(tea_type="tieguanyin", aroma_style="qingxiang", roast_level=None, season="spring", price="200")}]
     candidates = service._candidates(version=version, decisions=decisions, inputs=inputs)
     assert candidates
-    assert all(item.field_key not in {"tea_type", "aroma_style", "season"} for item in candidates)
+    assert any(item.field_key == "roast_level" and item.priority > 0 for item in candidates)
+    assert all(item.field_key not in {"tea_type", "aroma_style", "season", "price"} for item in candidates)
     assert all(item.field_key in {"roast_level", "price", "sample_available", "return_policy", "origin_text", "year_or_batch", "weight_grams", "process_text"} for item in candidates)
+    assert len({(item.candidate_id, item.field_key) for item in candidates}) == len(candidates)
 
 
 def test_boolean_merchant_questions_do_not_use_a_double_question_form() -> None:

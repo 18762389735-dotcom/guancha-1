@@ -60,6 +60,20 @@ def test_short_merchant_roast_answers_use_a_closed_mapping() -> None:
     assert heavy.claims[0]["normalized_value"] == "heavy"
 
 
+def test_merchant_reply_vocabulary_uses_real_closed_statuses() -> None:
+    provider = FakeMerchantReplyReasoningProvider()
+    expected = {
+        "轻": ("answered", "light"), "浅": ("answered", "light"),
+        "重": ("answered", "heavy"), "深": ("answered", "heavy"),
+        "浓": ("answered", "heavy"), "淡": ("partially-answered", None),
+        "不知道": ("not-answered", None), "没问这个": ("not-answered", None),
+    }
+    for text, (status, value) in expected.items():
+        parsed = asyncio.run(provider.parse_merchant_reply(field_key="roast_level", raw_text=text, product_evidence=()))
+        assert parsed.reply_status == status
+        assert (parsed.claims[0]["normalized_value"] if parsed.claims else None) == value
+
+
 def test_sample_reply_negation_wins_before_positive_substrings() -> None:
     provider = FakeMerchantReplyReasoningProvider()
     for text in ("不提供", "没有", "不可以", "没有小样", "不提供试饮"):

@@ -28,7 +28,7 @@ class FakeMerchantReplyReasoningProvider:
     """Deterministic test parser; production adapters must return this closed schema."""
     async def parse_merchant_reply(self, *, field_key: str, raw_text: str, product_evidence: tuple[dict[str, object], ...]) -> MerchantReplyParse:
         text = raw_text.lower()
-        if any(token in text for token in ('不知道', '不清楚', '以实物为准')):
+        if any(token in text for token in ('不知道', '不清楚', '没问这个', '没有问这个', '以实物为准')):
             return MerchantReplyParse('not-answered', (), (), (field_key,), (), 0, 0, False)
         if any(token in text for token in ('老客户', '大师', '品质很好', '高山')):
             return MerchantReplyParse('evasive', (), (), (field_key,), (), 0, 1, False)

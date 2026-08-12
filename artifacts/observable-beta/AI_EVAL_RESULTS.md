@@ -1,18 +1,20 @@
-# AI Evaluation Matrix
+# AI Eval Results
 
-Status: executable fixed-set contract, 2026-08-13.
+Run at: 2026-08-12T18:10:11.978097+00:00
 
-The machine-readable source is `backend/evaluation/ai_eval_cases.json`. Run it from any working directory with:
+This is the fixed deterministic/fixture test-set result, not real-world model accuracy.
+No Provider network call or API key access is performed.
 
-```powershell
-backend\.venv\Scripts\python.exe backend\scripts\run_ai_eval.py
-```
+## Totals
 
-The runner invokes existing pytest nodes, never calls a real Provider, never reads API keys, and writes `artifacts/observable-beta/AI_EVAL_RESULTS.md`. `PASS` means the stated fixed test executed successfully. `BLOCKED` is not PASS. `fixture_pipeline` begins with fixed structured Extraction fixtures and is not a live vision-pipeline claim.
+- Total: 27
+- PASS: 24
+- FAIL: 0
+- BLOCKED: 3
 
-Current run: Total 27; PASS 24; FAIL 0; BLOCKED 3 because `TEST_DATABASE_URL` is absent.
+## Cases
 
-| Case | Level | Category | Failure category if broken | Current |
+| Case | Level | Category | Failure taxonomy | Result |
 |---|---|---|---|---|
 | EXT-01 | fixture_pipeline | Extraction Safety | EXTRACTION_MISS | PASS |
 | EXT-02 | fixture_pipeline | Extraction Safety | EXTRACTION_HALLUCINATION | PASS |
@@ -42,4 +44,20 @@ Current run: Total 27; PASS 24; FAIL 0; BLOCKED 3 because `TEST_DATABASE_URL` is
 | ANS-01 | deterministic_unit | Decision Answer | DECISION_ANSWER_MISMATCH | PASS |
 | STATE-01 | database_integration | State Safety | DECISION_STATE_STALE | BLOCKED |
 
-Coverage details remain in the manifest through exact `pytest_nodeids`. Marketing safety executes all five required terms individually. Merchant reply vocabulary executes 轻、重、浅、深、淡、浓、提供、不提供、有、没有、不知道、没问这个 across the roast and sample contracts. Question coverage verifies a high-value unknown roast question, no repeat of known price, and unique candidate/field pairs.
+## By category
+
+- Current Need: PASS 4 / FAIL 0 / BLOCKED 0
+- Decision Answer: PASS 1 / FAIL 0 / BLOCKED 0
+- Evidence Safety: PASS 4 / FAIL 0 / BLOCKED 0
+- Extraction Safety: PASS 4 / FAIL 0 / BLOCKED 0
+- Merchant Reply: PASS 4 / FAIL 0 / BLOCKED 0
+- Question: PASS 3 / FAIL 0 / BLOCKED 0
+- Rejudge and Delta: PASS 1 / FAIL 0 / BLOCKED 2
+- Sensory Translation: PASS 3 / FAIL 0 / BLOCKED 0
+- State Safety: PASS 0 / FAIL 0 / BLOCKED 1
+
+## Boundary
+
+- BLOCKED means an executable case could not run in this environment; it is never counted as PASS.
+- `fixture_pipeline` starts from fixed structured Extraction fixtures and does not evaluate the live vision Provider.
+- Failure taxonomy is the classification assigned if the case fails; PASS does not mean that a failure occurred.
