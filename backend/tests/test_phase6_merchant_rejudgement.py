@@ -13,6 +13,9 @@ from PIL import Image
 from psycopg.rows import dict_row
 
 from guancha_api.application.task_runners import ManualTaskRunner
+from guancha_api.application.merchant_reply_service import MerchantReplyService
+from guancha_api.domain.tieguanyin.decision import evaluate_candidate, rank_within_buckets
+from guancha_api.domain.tieguanyin.rules.rule_schema import load_approved_rules
 from guancha_api.infrastructure.storage.memory import InMemoryTemporaryPrivateStorage
 from guancha_api.main import create_app
 from guancha_api.providers.fake import FakeProvider
@@ -224,3 +227,75 @@ async def test_evasive_reply_still_produces_a_comparative_decision(repository: P
         completed = await client.get(f"/api/v1/jobs/{job.json()['id']}", headers=headers)
         assert completed.json()["status"] == "completed"
         assert completed.json()["decision_version_id"] != v1
+
+
+async def test_unrelated_reply_preserves_v1_bounded_preference_component_and_ranking() -> None:
+    preferred_id = uuid4()
+    other_id = uuid4()
+    version_id = uuid4()
+    reply_id = uuid4()
+    extraction_ids = {preferred_id: uuid4(), other_id: uuid4()}
+    explicit = lambda **values: [
+        {"field_name": key, "normalized_value": value, "information_status": "explicit"}
+        for key, value in values.items()
+    ]
+    inputs = [
+        {"candidate_id": preferred_id, "extraction_version_id": extraction_ids[preferred_id], "evidence": explicit(tea_type="tieguanyin", aroma_style="nongxiang", roast_level="light", season="spring")},
+        {"candidate_id": other_id, "extraction_version_id": extraction_ids[other_id], "evidence": explicit(tea_type="tieguanyin", aroma_style="qingxiang", roast_level="light", season="spring")},
+    ]
+    parent = {
+        "need_snapshot": {},
+        "recent_preference_evidence": [{
+            "confidence": "low", "issue_source": "tea", "target_type": "aroma",
+            "target_value": "nongxiang", "polarity": "positive",
+        }],
+    }
+    replies = [{
+        "id": reply_id, "candidate_id": preferred_id, "field_key": "return_policy",
+        "processing_status": "completed", "parse_status": "evasive",
+    }]
+    v1_ranked = rank_within_buckets([
+        evaluate_candidate(
+            candidate_id=item["candidate_id"], extraction_version_id=item["extraction_version_id"],
+            need=parent["need_snapshot"], evidence=item["evidence"], rules=load_approved_rules(),
+            recent_preference_evidence=parent["recent_preference_evidence"],
+        )
+        for item in inputs
+    ])
+    old_rows = [
+        {"candidate_id": draft.candidate_id, "action_bucket": draft.action_bucket.value}
+        for draft in v1_ranked
+    ]
+
+    class RepositoryStub:
+        completed = None
+
+        async def claim_job(self, *, job_id):
+            return True
+
+        async def merchant_rejudgement_batch(self, *, anchor_reply_id, client_id):
+            return ({"decision_version_id": version_id}, parent, inputs, replies, [])
+
+        async def get_decision_version_for_client(self, *, version_id, client_id):
+            return ({"top_candidate_id": v1_ranked[0].candidate_id}, old_rows)
+
+        async def complete_aggregate_merchant_rejudgement(self, **kwargs):
+            self.completed = kwargs
+
+        async def fail_aggregate_merchant_rejudgement(self, **kwargs):
+            raise AssertionError(f"rejudge unexpectedly failed: {kwargs}")
+
+    repository = RepositoryStub()
+    await MerchantReplyService(repository=repository).run_rejudge(
+        job_id=uuid4(), reply_id=reply_id, client_id=uuid4(), fingerprint="bounded-preference",
+    )
+
+    decisions = repository.completed["decisions"]
+    assert [row["candidate_id"] for row in decisions] == [draft.candidate_id for draft in v1_ranked]
+    assert {
+        row["candidate_id"]: row["score_components"]["personal_low_confidence"] for row in decisions
+    } == {
+        draft.candidate_id: draft.score_components["personal_low_confidence"] for draft in v1_ranked
+    }
+    assert decisions[0]["candidate_id"] == preferred_id
+    assert repository.completed["delta"]["ranking_changed"] is False

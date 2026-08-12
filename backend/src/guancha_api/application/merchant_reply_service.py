@@ -79,6 +79,7 @@ class MerchantReplyService:
                 evaluate_candidate(
                     candidate_id=item["candidate_id"], extraction_version_id=item["extraction_version_id"],
                     need=parent["need_snapshot"], evidence=item["evidence"], rules=load_approved_rules(),
+                    recent_preference_evidence=list(parent.get("recent_preference_evidence") or []),
                 )
                 for item in inputs
             ]

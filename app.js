@@ -105,7 +105,7 @@ function applyInitialRoute(next) {
 }
 function loadState() {
   const uiFallback = { screen: defaultState.screen, overlay: null, openDrink: defaultState.openDrink, activeCandidate: 0, o1: defaultState.o1, o2: defaultState.o2, ownershipChoice: defaultState.ownershipChoice, brew: null, journalDate: null, activeRecordId: null };
-  const selectionFallback = { sessionId: null, candidates: [], reply: '', need: defaultState.need, decisionVersionId: null, decisionJobId: null, decisionStatus: 'not_requested', selectionAnswer: null, followupQuestions: [], questionStatus: 'idle', merchantReplyIds: {}, merchantReplies: {}, rejudgeJobId: null, lastDecisionDelta: null, deltaStatus: 'idle', jobIds: {} };
+  const selectionFallback = { sessionId: null, candidates: [], reply: '', need: defaultState.need, decisionVersionId: null, decisionJobId: null, decisionStatus: 'not_requested', selectionAnswer: null, followupQuestions: [], questionStatus: 'idle', questionDecisionVersionId: null, merchantReplyIds: {}, merchantReplies: {}, rejudgeJobId: null, lastDecisionDelta: null, deltaStatus: 'idle', jobIds: {} };
   const postPurchaseFallback = { warehouse: defaultState.warehouse, journalRecords: defaultState.journalRecords, history: [], selectedTeaId: null };
   const ui = GuanchaStores.uiSession.load(uiFallback);
   const bridge = GuanchaStores.selectionBridge.load(selectionFallback);
@@ -180,7 +180,7 @@ function imageLimit() { return Math.min(PRODUCT_LIMITS.maxImagesPerCandidate, pu
 
 function saveState() {
   GuanchaStores.uiSession.save({ screen: state.screen, overlay: null, openDrink: state.openDrink || '', activeCandidate: state.activeCandidate, o1: state.o1, o2: state.o2, ownershipChoice: state.ownershipChoice, brew: state.brew, journalDate: state.journalDate || null, activeRecordId: state.activeRecordId || null, activeSelectionFlow: state.activeSelectionFlow === true, preferenceFlow: state.preferenceFlow || null });
-  GuanchaStores.selectionBridge.save({ sessionId: state.sessionId || null, candidates: state.candidates, reply: state.reply || '', need: state.need, decisionVersionId: state.decisionVersionId || null, decisionJobId: state.decisionJobId || null, decisionStatus: state.decisionStatus || 'not_requested', selectionAnswer: state.selectionAnswer || null, followupQuestions: state.followupQuestions || [], questionStatus: state.questionStatus || 'idle', merchantReplyIds: state.merchantReplyIds || {}, merchantReplies: state.merchantReplies || {}, rejudgeJobId: state.rejudgeJobId || null, lastDecisionDelta: state.lastDecisionDelta || null, deltaStatus: state.deltaStatus || 'idle', jobIds: state.jobIds || {} });
+  GuanchaStores.selectionBridge.save({ sessionId: state.sessionId || null, candidates: state.candidates, reply: state.reply || '', need: state.need, decisionVersionId: state.decisionVersionId || null, decisionJobId: state.decisionJobId || null, decisionStatus: state.decisionStatus || 'not_requested', selectionAnswer: state.selectionAnswer || null, followupQuestions: state.followupQuestions || [], questionStatus: state.questionStatus || 'idle', questionDecisionVersionId: state.questionDecisionVersionId || null, merchantReplyIds: state.merchantReplyIds || {}, merchantReplies: state.merchantReplies || {}, rejudgeJobId: state.rejudgeJobId || null, lastDecisionDelta: state.lastDecisionDelta || null, deltaStatus: state.deltaStatus || 'idle', jobIds: state.jobIds || {} });
   GuanchaStores.localPostPurchase.save({ warehouse: state.warehouse, journalRecords: state.journalRecords, history: state.history, selectedTeaId: state.selectedTeaId || null });
 }
 function apiNeed() {
@@ -421,6 +421,7 @@ async function resumeLiveBackendState() {
     // The server owns question/reply/rejudge progress. Browser storage only
     // caches presentation state and must not decide aggregate readiness.
     state.followupQuestions = snapshot.questions || [];
+    state.questionDecisionVersionId = snapshot.question_decision_version_id || null;
     state.merchantReplyIds = Object.fromEntries((snapshot.merchant_replies || []).map(reply => [reply.followup_question_id, reply.id]));
     state.merchantReplies = Object.fromEntries((snapshot.merchant_replies || []).map(reply => [reply.followup_question_id, reply]));
     state.lastDecisionDelta = snapshot.decision_delta || null;
@@ -430,7 +431,9 @@ async function resumeLiveBackendState() {
     else if (state.followupQuestions.length) {
       const questionIds = new Set(state.followupQuestions.map(item => item.id));
       state.questionStatus = [...questionIds].every(id => state.merchantReplyIds[id]) ? 'ready' : 'completed';
-    } else state.questionStatus = 'idle';
+    } else if (snapshot.question_generation_status === 'completed') state.questionStatus = 'not-needed';
+    else if (snapshot.question_generation_status === 'failed') state.questionStatus = 'failed';
+    else state.questionStatus = 'idle';
   } catch (error) {
     if (error?.code === 'selection_session_not_found') clearStaleRemoteSelection();
     return;
@@ -525,12 +528,13 @@ async function openFollowupQuestions() {
     let questions = await apiClient.getDecisionQuestions(state.decisionVersionId);
     if (!questions.length) questions = await apiClient.generateDecisionQuestions(state.decisionVersionId);
     state.followupQuestions = questions;
+    state.questionDecisionVersionId = state.decisionVersionId;
     // Reopening the sheet must preserve the aggregate-rejudge readiness that
     // was earned by replies saved before this render.
     const requiredQuestionIds = new Set(questions.map(item => item.id));
-    state.questionStatus = requiredQuestionIds.size > 0 && [...requiredQuestionIds].every(id => state.merchantReplyIds?.[id])
-      ? 'ready'
-      : 'completed';
+    state.questionStatus = requiredQuestionIds.size === 0
+      ? 'not-needed'
+      : [...requiredQuestionIds].every(id => state.merchantReplyIds?.[id]) ? 'ready' : 'completed';
     saveState(); render();
   } catch (error) {
     state.questionStatus = error.code === 'decision_stale' ? 'stale' : 'failed';
@@ -567,13 +571,6 @@ async function submitMerchantReply(rawText) {
     state.merchantReplies = state.merchantReplies || {};
     state.merchantReplyIds[question.id] = reply.id;
     state.merchantReplies[question.id] = reply;
-    for (const extraQuestion of questions.slice(1)) {
-      const extraReply = await apiClient.createMerchantReply(state.sessionId, {
-        decision_version_id: state.decisionVersionId, followup_question_id: extraQuestion.id, raw_text: rawText,
-      });
-      state.merchantReplyIds[extraQuestion.id] = extraReply.id;
-      state.merchantReplies[extraQuestion.id] = extraReply;
-    }
     const requiredQuestionIds = new Set((state.followupQuestions || []).map(item => item.id));
     state.questionStatus = [...requiredQuestionIds].every(id => state.merchantReplyIds[id]) ? 'ready' : 'completed';
     saveState(); render();
@@ -867,10 +864,12 @@ function appendMerchantReplyForm() {
   const form = document.createElement('form');
   form.className = 'merchant-reply-form'; form.dataset.action = 'submit-merchant-reply';
   const ready = state.questionStatus === 'ready';
-  const needsClarification = merchantQuestions(currentCandidate()).some(item => replyNeedsClarification(item.reply));
+  const currentQuestion = merchantQuestions(currentCandidate()).find(item => !item.reply || replyNeedsClarification(item.reply));
+  const needsClarification = replyNeedsClarification(currentQuestion?.reply);
+  const targetLabel = currentQuestion ? `（对应：${escapeHtml(currentQuestion.question)}）` : '';
   form.innerHTML = ready && !needsClarification
     ? '<p class="soft-note">所有需要回复的候选茶已保存。确认后统一更新本轮判断。</p><button class="primary-btn" type="button" data-action="update-merchant-judgement">提交并更新判断</button>'
-    : `<label>商家回复</label><textarea name="merchant-reply" required maxlength="4000" placeholder="${needsClarification ? '请补充更明确的回答，例如：轻火 / 中火 / 足火' : '粘贴商家对当前问题的回复'}"></textarea><button class="primary-btn" type="submit">${needsClarification ? '补充商家回复' : '提交商家回复'}</button>`;
+    : `<label>商家回复${targetLabel}</label><textarea name="merchant-reply" required maxlength="4000" placeholder="${needsClarification ? '请只补充当前问题的明确回答' : '粘贴商家对当前问题的回复'}"></textarea><button class="primary-btn" type="submit">${needsClarification ? '补充商家回复' : '提交商家回复'}</button>`;
   sheet.append(form);
 }
 // Archived composition for reference only. It is deliberately not reachable
@@ -966,7 +965,8 @@ function renderResult() {
     // offers the same deliberate choice to take that specific tea into the
     // tea store.  A per-card bucket must not accidentally create two flows.
     const comparisonSettled = isRejudged()
-      || state.lastDecisionDelta?.new_decision_version_id === state.decisionVersionId;
+      || state.lastDecisionDelta?.new_decision_version_id === state.decisionVersionId
+      || (state.questionStatus === 'not-needed' && state.questionDecisionVersionId === state.decisionVersionId);
     const sensory = answerCandidate?.sensory_interpretations || [];
     const preferenceReference = GuanchaAdapters.buildPreferenceReference({ o1: state.o1, o2: state.o2 });
     const personalFit = GuanchaAdapters.buildPersonalFitPresentation({ need: state.need, sensoryInterpretations: sensory, preferenceReference });

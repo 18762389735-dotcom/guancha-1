@@ -849,6 +849,7 @@ class PostgresPhase2Repository:
                 "candidates": candidates,
                 "current_decision_id": None,
                 "question_decision_version_id": None,
+                "question_generation_status": None,
                 "questions": [],
                 "merchant_replies": [],
                 "rejudge_job": None,
@@ -861,6 +862,7 @@ class PostgresPhase2Repository:
         # must follow the immutable parent rather than asking localStorage to
         # remember them.
         question_version_id = version["parent_decision_version_id"] or version["id"]
+        question_generation_status = await self.get_question_generation_state(version_id=question_version_id)
         async with self._connection.cursor() as cursor:
             await cursor.execute(
                 """select id,decision_version_id,selection_session_id,candidate_id,field_key,
@@ -899,6 +901,7 @@ class PostgresPhase2Repository:
             "candidates": candidates,
             "current_decision_id": version["id"],
             "question_decision_version_id": question_version_id,
+            "question_generation_status": question_generation_status,
             "questions": questions,
             "merchant_replies": replies,
             "rejudge_job": rejudge_job,
@@ -1219,6 +1222,19 @@ class PostgresPhase2Repository:
             version_id=anchor["decision_version_id"], client_id=client_id
         )
         async with self._connection.cursor() as cursor:
+            await cursor.execute(
+                """select recent_preference_evidence from selection_sessions
+                   where id=%s and anonymous_client_id=%s""",
+                (version["selection_session_id"], client_id),
+            )
+            session = await cursor.fetchone()
+            if session is None:
+                await self._raise_ownership_or_not_found(
+                    "selection_sessions", version["selection_session_id"], client_id
+                )
+            # Updating a session need/preferences stales its current Decision,
+            # so a current V1 can safely reuse this bounded session snapshot.
+            version["recent_preference_evidence"] = list(session["recent_preference_evidence"] or [])
             await cursor.execute(
                 """select r.id,r.candidate_id,r.raw_text,r.processing_status,r.parse_status,q.field_key
                    from merchant_replies r join followup_questions q on q.id=r.followup_question_id

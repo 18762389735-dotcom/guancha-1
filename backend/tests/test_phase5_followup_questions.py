@@ -82,6 +82,36 @@ async def test_current_decision_generates_and_reads_deduplicated_questions(repos
         assert await repository.get_question_generation_state(version_id=version_id) == "completed"
 
 
+async def test_completed_empty_question_generation_is_visible_in_session_snapshot(repository: PostgresPhase2Repository) -> None:
+    class EmptyReasoningProvider:
+        async def generate_questions(self, candidates):
+            return ()
+
+    runner = ManualTaskRunner()
+    app = create_app(
+        repository=repository,
+        task_runner=runner,
+        temporary_storage=InMemoryTemporaryPrivateStorage(),
+        provider=_provider(),
+        reasoning_provider=EmptyReasoningProvider(),
+    )
+    headers = {"X-Client-Id": str(uuid4())}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        session_id, version_id = await _decision(client, headers, runner)
+        created = await client.post(
+            f"/api/v1/decision-versions/{version_id}/questions",
+            headers={**headers, "Idempotency-Key": str(uuid4())},
+        )
+        assert created.status_code == 201
+        assert created.json() == []
+
+        snapshot = await client.get(f"/api/v1/selection-sessions/{session_id}/snapshot", headers=headers)
+        assert snapshot.status_code == 200
+        assert snapshot.json()["questions"] == []
+        assert snapshot.json()["question_decision_version_id"] == version_id
+        assert snapshot.json()["question_generation_status"] == "completed"
+
+
 async def test_stale_decision_and_foreign_client_cannot_use_questions(repository: PostgresPhase2Repository) -> None:
     runner = ManualTaskRunner(); app = create_app(repository=repository, task_runner=runner, temporary_storage=InMemoryTemporaryPrivateStorage(), provider=_provider())
     headers = {"X-Client-Id": str(uuid4())}
