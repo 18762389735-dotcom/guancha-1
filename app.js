@@ -475,7 +475,7 @@ function fitLabel(candidate, answerCandidate) {
   // A server order can be driven by evidence sufficiency or trial cost.  It
   // must not be presented as a taste win when the explicit need found no
   // positive match for either candidate.
-  if (Number(candidate?.decision?.score_components?.need_match || 0) <= 0) return '口味方向暂未分出高下';
+  if (GuanchaAdapters.sensoryNeedMatch(candidate?.decision) <= 0) return '口味方向暂未分出高下';
   if (Number(candidate?.decision?.overall_order) === 1) return '当前更接近你的方向';
   if ((answerCandidate?.sensory_interpretations || []).length) return '更偏另一种风格';
   return answerCandidate?.verdict || '目前还需要更多线索';
@@ -971,8 +971,8 @@ function renderResult() {
     const preferenceReference = GuanchaAdapters.buildPreferenceReference({ o1: state.o1, o2: state.o2 });
     const personalFit = GuanchaAdapters.buildPersonalFitPresentation({ need: state.need, sensoryInterpretations: sensory, preferenceReference });
     const fitLines = personalFit.lines.map((line) => `<li>${escapeHtml(line)}</li>`).join('');
-    const fitCaveat = Number(candidate.decision?.score_components?.need_match || 0) <= 0
-      ? '<p class="soft-note result-fit-caveat">两款目前都没有足够证据表明更符合你这次的口味方向；当前顺序只比较信息完整度与试错条件，不代表哪款一定更合口味。</p>'
+    const fitCaveat = GuanchaAdapters.sensoryNeedMatch(candidate.decision) <= 0
+      ? '<p class="soft-note result-fit-caveat">这款目前没有足够证据表明更符合你这次的口味方向；它的当前顺序也可能来自信息完整度与试错条件，不代表一定更合口味。</p>'
       : '';
     const sensoryHtml = sensory.slice(0, 2).map((item) => `<li><b>${escapeHtml(item.label)}</b>：${escapeHtml(item.text)}<small>${escapeHtml(item.boundary)}</small></li>`).join('');
     const question = answerCandidate?.next_step;

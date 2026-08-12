@@ -204,8 +204,13 @@ def _coerce(value: Any) -> Any:
 def _budget_fit(text: Any, price: Any) -> int:
     if not text or not isinstance(price, Decimal):
         return 0
-    match = re.search(r"\d+(?:\.\d+)?", str(text))
-    return 1 if match and price <= Decimal(match.group()) else (-1 if match else 0)
+    amounts = [Decimal(value) for value in re.findall(r"\d+(?:\.\d+)?", str(text))]
+    if not amounts:
+        return 0
+    # A budget range describes an allowed ceiling, not its first number.
+    # ``150–300``, ``150-300`` and ``300以内`` therefore all cap at 300.
+    ceiling = max(amounts)
+    return 1 if price <= ceiling else -1
 
 
 def _text_match(text: Any, style: Any) -> int:
@@ -300,7 +305,7 @@ def _roast_match(text: Any, roast: Any) -> int:
     wanted, actual = str(text).lower(), str(roast).lower()
     strong = any(token in actual for token in ("heavy", "strong", "\u91cd\u7119", "\u6d53\u7119", "\u9ad8\u7119"))
     light = any(token in actual for token in ("light", "\u8f7b\u7119", "\u4f4e\u7119"))
-    avoids_strong = any(token in wanted for token in ("avoid roast", "avoid fire", "\u6015\u706b", "\u4e0d\u63a5\u53d7\u7119", "\u4e0d\u559c\u6b22\u7119", "\u8f7b\u7119", "\u706b\u5473\u5c11"))
+    avoids_strong = any(token in wanted for token in ("avoid roast", "avoid fire", "\u6015\u706b", "\u4e0d\u63a5\u53d7\u7119", "\u4e0d\u559c\u6b22\u7119", "\u8f7b\u7119", "\u4f4e\u706b", "\u4f4e\u706b\u5473", "\u706b\u5473\u5c11"))
     accepts_strong = any(token in wanted for token in ("accept heavy roast", "accept roast", "\u63a5\u53d7\u7119\u706b", "\u559c\u6b22\u7119\u706b", "\u91cd\u7119", "\u6d53\u7119", "\u706b\u5473"))
     if strong:
         return -1 if avoids_strong else 1 if accepts_strong else 0

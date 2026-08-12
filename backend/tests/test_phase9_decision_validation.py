@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import pytest
 
-from guancha_api.domain.tieguanyin.decision import evaluate_candidate, rank_within_buckets
+from guancha_api.domain.tieguanyin.decision import _budget_fit, evaluate_candidate, rank_within_buckets
 from guancha_api.domain.tieguanyin.rules import load_approved_rules
 from guancha_api.application.question_service import QuestionGenerationService, _question_text
 from guancha_api.application.answer_contract import build_selection_answer
@@ -163,6 +163,15 @@ def test_explicit_low_fire_need_breaks_a_same_bucket_tie() -> None:
     assert rank_within_buckets([heavy, light])[0].candidate_id == light.candidate_id
 
 
+def test_low_fire_wording_is_not_reversed_by_the_broad_fire_token() -> None:
+    need = {"taste_text": "清爽、低火味"}
+    heavy = _draft(need=need, evidence=_evidence(**{**FULL, "roast_level": "heavy"}))
+    light = _draft(need=need, evidence=_evidence(**FULL))
+    assert heavy.score_components["need_match"] < light.score_components["need_match"]
+    assert heavy.score_components["explicit_sensory_need_match"] < light.score_components["explicit_sensory_need_match"]
+    assert rank_within_buckets([heavy, light])[0].candidate_id == light.candidate_id
+
+
 def test_explicit_rich_need_is_not_a_qingxiang_preference() -> None:
     need = {"taste_text": "喜欢熟香、焙火感明显一些"}
     rich = _draft(need=need, evidence=_evidence(**{**FULL, "aroma_style": "nongxiang", "roast_level": "heavy"}))
@@ -234,6 +243,14 @@ def test_m9_price_removal_cannot_become_budget_fit() -> None:
     assert unknown.score_components["budget_fit"] <= 0
     assert unknown.action_bucket is ActionBucket.ASK_BEFORE_BUYING
     assert priced.action_bucket is ActionBucket.NOT_RECOMMENDED_NOW
+
+
+@pytest.mark.parametrize("budget", ["150–300 元", "150-300", "300以内"])
+def test_budget_ranges_use_the_upper_bound(budget: str) -> None:
+    from decimal import Decimal
+
+    assert _budget_fit(budget, Decimal("250")) == 1
+    assert _budget_fit(budget, Decimal("350")) == -1
 
 
 def test_m10_sample_unknown_is_not_yes() -> None:

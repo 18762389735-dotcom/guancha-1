@@ -21,6 +21,10 @@
       extractionStatus: candidate.extractionStatus || 'empty',
     };
   }
+  function sensoryNeedMatch(decision = {}) {
+    const components = decision.score_components || {};
+    return Number(components.explicit_sensory_need_match || 0) + Number(components.need_match || 0);
+  }
   function buildPreferenceReference({ o1 = {}, o2 = {} } = {}) {
     const references = [];
     const selectedDrinks = Object.values(o1).flat().filter(Boolean).slice(0, 2);
@@ -59,5 +63,5 @@
     if (preferenceReference.length) lines.push(`${preferenceReference.map((item) => item.text).join('')}这只作为低置信口味参考，不会覆盖你这次的需求。`);
     return { lines, preferenceReference };
   }
-  global.GuanchaAdapters = { actionLabels, jobToCandidateStatus, candidateToViewModel, buildPreferenceReference, buildPersonalFitPresentation };
+  global.GuanchaAdapters = { actionLabels, jobToCandidateStatus, candidateToViewModel, sensoryNeedMatch, buildPreferenceReference, buildPersonalFitPresentation };
 }(window));

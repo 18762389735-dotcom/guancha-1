@@ -42,3 +42,10 @@ test('controlled sensory evidence can explain a different fit without ranking', 
   assert.match(presentation.lines[1], /更偏另一种风格/);
   assert.doesNotMatch(presentation.lines[1], /首选|排名|一定/);
 });
+
+test('fit presentation uses explicit sensory and legacy need signals together', () => {
+  const api = adapters();
+  assert.equal(api.sensoryNeedMatch({ score_components: { explicit_sensory_need_match: 2, need_match: -1 } }), 1);
+  assert.equal(api.sensoryNeedMatch({ score_components: { explicit_sensory_need_match: -1, need_match: 1 } }), 0);
+  assert.equal(api.sensoryNeedMatch({}), 0);
+});
