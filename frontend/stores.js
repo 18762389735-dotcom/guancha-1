@@ -150,6 +150,8 @@
   const preferenceTargetTypes = new Set(['tea-style','aroma','roast','bitterness','astringency','sweetness','mouthfeel','aftertaste','salivation','finish']);
   const preferencePolarities = new Set(['positive','negative']);
   const preferenceSources = new Set(['tea','brewing','uncertain']);
+  const warehouseFactTokens = new Set(['轻火焙制','2026 年春茶','支持 10g 试饮装','茶类已确认：白茶','茶类已确认：黑茶','来自本次截图提取','待补充']);
+  const warehouseRiskTokens = new Set(['具体产地仍待确认','年份与产地未记录','原始购买信息待补','产地与年份待补','产地与年份未记录']);
   function safeStringArray(value, limit = 8, itemLimit = 200) {
     return (Array.isArray(value) ? value : []).slice(0, limit).flatMap(item => {
       const safe = boundedString(item, itemLimit); return safe === null ? [] : [safe];
@@ -166,8 +168,8 @@
     if (Number.isInteger(value.records) && value.records >= 0 && value.records <= 10000) result.records = value.records;
     for (const field of ['extraction_version_id','candidate_id','sourceDecisionId']) { const safe = safeUuid(value[field]); if (safe) result[field] = safe; }
     if (isIsoTimestamp(value.joined_at)) result.joined_at = value.joined_at;
-    result.facts = safeStringArray(value.facts, 8, 200);
-    result.risks = safeStringArray(value.risks, 8, 200);
+    result.facts = safeStringArray(value.facts, 8, 200).filter(item => warehouseFactTokens.has(item));
+    result.risks = safeStringArray(value.risks, 8, 200).filter(item => warehouseRiskTokens.has(item) || /^[a-z0-9_-]{1,64}$/i.test(item));
     result.risk_flags = safeStringArray(value.risk_flags, 8, 64).filter(item => /^[a-z0-9_-]+$/i.test(item));
     return result;
   }

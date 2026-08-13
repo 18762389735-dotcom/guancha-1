@@ -144,13 +144,15 @@ test('post-purchase store restores bounded warehouse journal and semantic histor
   const { window, values } = loadStore();
   const key = window.GuanchaStores.localPostPurchase.key;
   window.GuanchaStores.localPostPurchase.save({
-    warehouse: [{ id: 'tea-1', name: 'User tea', type: '乌龙茶', status: 'drinking', records: 1, facts: ['user fact'], merchantReply: { raw_text: 'secret' } }],
+    warehouse: [{ id: 'tea-1', name: 'User tea', type: '乌龙茶', status: 'drinking', records: 1, facts: ['待补充', 'merchant raw reply'], risks: ['origin_claim_conflict', 'merchant raw reply'], merchantReply: { raw_text: 'secret' } }],
     journalRecords: [{ id: 'record-123', date: '2026-08-13', teaId: 'tea-1', infusions: [{ number: 1, suggested: 10, actual: 11, reply: 'secret' }], plan: { ware: '盖碗', water: '110 ml', unknown: 'secret' }, feedback: { taste: '喜欢', impression: 'my note', merchant: { summary: 'secret' } }, feedbackAnalysis: { text: 'secret' } }],
     history: [{ date: '08.13', recommended_candidate_id: '33333333-3333-4333-8333-333333333333', recommended_candidate_label: 'A', selected_candidate_id: '44444444-4444-4444-8444-444444444444', selected_candidate_label: 'B', purpose: 'private Need', selected_candidate_name: 'private name', selectionAnswer: { summary: 'secret' } }],
     merchantReplies: [{ raw_text: 'secret' }],
   });
   const loaded = window.GuanchaStores.localPostPurchase.load({ warehouse: [], journalRecords: [], history: [] });
   assert.equal(loaded.warehouse[0].name, 'User tea');
+  assert.deepEqual(JSON.parse(JSON.stringify(loaded.warehouse[0].facts)), ['待补充']);
+  assert.deepEqual(JSON.parse(JSON.stringify(loaded.warehouse[0].risks)), ['origin_claim_conflict']);
   assert.equal(loaded.journalRecords[0].feedback.impression, 'my note');
   assert.deepEqual(JSON.parse(JSON.stringify(loaded.history[0])), { date: '08.13', recommended_candidate_id: '33333333-3333-4333-8333-333333333333', selected_candidate_id: '44444444-4444-4444-8444-444444444444', recommended_candidate_label: 'A', selected_candidate_label: 'B' });
   assert.doesNotMatch(values.get(key), /merchant|raw_text|selectionAnswer|private Need|private name|secret|feedbackAnalysis|unknown/);
