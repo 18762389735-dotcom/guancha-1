@@ -89,6 +89,18 @@ async def test_runners_reject_same_pending_job_and_release_identity_after_comple
     await active.shutdown()
 
 
+async def test_manual_shutdown_discards_pending_work_and_releases_job_ids() -> None:
+    runner = ManualTaskRunner()
+    calls: list[str] = []
+    async def task() -> None: calls.append("ran")
+    assert await runner.enqueue(job_id="pending", task=task) is True
+    await runner.shutdown()
+    assert runner.pending_count == 0
+    assert await runner.enqueue(job_id="pending", task=task) is True
+    await runner.drain()
+    assert calls == ["ran"]
+
+
 def _payload() -> dict[str, object]:
     return {
         "evidence": [{

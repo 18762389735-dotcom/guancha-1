@@ -91,4 +91,5 @@ class ManualTaskRunner:
 
     async def shutdown(self) -> None:
         """Lifecycle-compatible no-op for deterministic tests."""
-        return None
+        self.tasks.clear()
+        self._job_ids.clear()
