@@ -90,3 +90,68 @@ test('ui session is a closed anchor store and cannot retain reply text', () => {
   assert.match(persisted, /绿茶|兰花/);
   assert.doesNotMatch(persisted, /private|merchant|raw_text|secret|overlay|brew/);
 });
+
+test('legacy is cleared even when a new selection bridge already exists', () => {
+  const selectionKey = 'guancha.selection-bridge.v1';
+  const legacyKey = 'guancha-prototype-v2';
+  const { window, values } = loadStore({
+    [selectionKey]: JSON.stringify({ schemaVersion: 3, sessionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', candidates: [] }),
+    [legacyKey]: JSON.stringify({ merchantReply: { raw_text: 'legacy secret' }, candidates: [{ fields: { summary: 'secret' } }] }),
+  });
+  window.GuanchaStores.migrateLegacy();
+  assert.equal(values.has(legacyKey), false);
+  assert.equal(JSON.parse(values.get(selectionKey)).sessionId, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+  assert.doesNotMatch([...values.values()].join(''), /legacy secret|summary/);
+});
+
+test('legacy projections populate missing safe stores then clear the raw key', () => {
+  const legacyKey = 'guancha-prototype-v2';
+  const { window, values } = loadStore({ [legacyKey]: JSON.stringify({
+    sessionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    candidates: [{ serverCandidateId: '33333333-3333-4333-8333-333333333333', letter: 'A', fields: { raw_text: 'secret' } }],
+    warehouse: [{ id: 'tea-1', name: 'My tea', status: 'drinking', merchantReply: { text: 'secret' } }],
+  }) });
+  window.GuanchaStores.migrateLegacy();
+  assert.equal(values.has(legacyKey), false);
+  assert.match(values.get(window.GuanchaStores.selectionBridge.key), /aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/);
+  assert.match(values.get(window.GuanchaStores.localPostPurchase.key), /My tea/);
+  assert.doesNotMatch([...values.values()].join(''), /raw_text|"merchantReply":|secret/);
+});
+
+test('preference evidence save and load share a strict projection and rewrite backing', () => {
+  const key = 'guancha.preference-evidence.v1';
+  const valid = { id: '11111111-1111-4111-8111-111111111111', target_type: 'roast', target_value: 'heavy-roast', polarity: 'negative', confidence: 'low', issue_source: 'tea', source_brew_session_id: 'record-123', created_at: new Date().toISOString(), raw_text: 'merchant secret', nested: { summary: 'secret' } };
+  const raw = JSON.stringify({ schemaVersion: 1, items: [valid, { ...valid, id: 'bad', source_brew_session_id: 'record-124' }], raw_text: 'top secret' });
+  const { window, values } = loadStore({ [key]: raw });
+  const loaded = window.GuanchaStores.preferenceEvidence.load({ items: [] });
+  assert.equal(loaded.items.length, 1);
+  assert.equal(loaded.items[0].target_value, 'heavy-roast');
+  assert.doesNotMatch(values.get(key), /raw_text|nested|summary|secret/);
+  window.GuanchaStores.preferenceEvidence.save({ items: [valid], merchant: { reply: 'secret' } });
+  assert.doesNotMatch(values.get(key), /merchant|reply|secret/);
+});
+
+test('preference evidence removes corrupt and array backing values', () => {
+  const key = 'guancha.preference-evidence.v1';
+  for (const raw of ['{broken', '[]']) {
+    const { window, values } = loadStore({ [key]: raw });
+    assert.deepEqual(JSON.parse(JSON.stringify(window.GuanchaStores.preferenceEvidence.load({ items: [] }))), { items: [] });
+    assert.equal(values.has(key), false);
+  }
+});
+
+test('post-purchase store restores bounded warehouse journal and semantic history only', () => {
+  const { window, values } = loadStore();
+  const key = window.GuanchaStores.localPostPurchase.key;
+  window.GuanchaStores.localPostPurchase.save({
+    warehouse: [{ id: 'tea-1', name: 'User tea', type: '乌龙茶', status: 'drinking', records: 1, facts: ['user fact'], merchantReply: { raw_text: 'secret' } }],
+    journalRecords: [{ id: 'record-123', date: '2026-08-13', teaId: 'tea-1', infusions: [{ number: 1, suggested: 10, actual: 11, reply: 'secret' }], plan: { ware: '盖碗', water: '110 ml', unknown: 'secret' }, feedback: { taste: '喜欢', impression: 'my note', merchant: { summary: 'secret' } }, feedbackAnalysis: { text: 'secret' } }],
+    history: [{ date: '08.13', recommended_candidate_id: '33333333-3333-4333-8333-333333333333', recommended_candidate_label: 'A', selected_candidate_id: '44444444-4444-4444-8444-444444444444', selected_candidate_label: 'B', purpose: 'private Need', selected_candidate_name: 'private name', selectionAnswer: { summary: 'secret' } }],
+    merchantReplies: [{ raw_text: 'secret' }],
+  });
+  const loaded = window.GuanchaStores.localPostPurchase.load({ warehouse: [], journalRecords: [], history: [] });
+  assert.equal(loaded.warehouse[0].name, 'User tea');
+  assert.equal(loaded.journalRecords[0].feedback.impression, 'my note');
+  assert.deepEqual(JSON.parse(JSON.stringify(loaded.history[0])), { date: '08.13', recommended_candidate_id: '33333333-3333-4333-8333-333333333333', selected_candidate_id: '44444444-4444-4444-8444-444444444444', recommended_candidate_label: 'A', selected_candidate_label: 'B' });
+  assert.doesNotMatch(values.get(key), /merchant|raw_text|selectionAnswer|private Need|private name|secret|feedbackAnalysis|unknown/);
+});

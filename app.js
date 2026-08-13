@@ -7,7 +7,6 @@ let activeCameraStream = null;
 let lastRenderedScreen = null;
 let lastResultAnalyticsEdge = null;
 
-const STORAGE_KEY = 'guancha-prototype-v2';
 const DRINKS = {
   tea: { label: '茶饮', icon: 'tea.png', options: ['绿茶', '花香茶', '乌龙茶', '红茶', '焙火茶', '陈香茶', '奶茶 / 果茶'] },
   coffee: { label: '咖啡', icon: 'coffee.png', options: ['美式 / 黑咖啡', '拿铁', '冷萃', '浅烘手冲', '深烘咖啡'] },
@@ -80,8 +79,7 @@ function storedObject(key) {
 }
 function savedPreferenceSnapshot() {
   const ui = storedObject(GuanchaStores.uiSession.key);
-  const legacy = storedObject('guancha-prototype-v2');
-  return { ...legacy, ...ui };
+  return ui || {};
 }
 function onboardingStatus() {
   return GuanchaOnboarding.resolveStatus(localStorage, savedPreferenceSnapshot());
@@ -115,18 +113,7 @@ function loadState() {
   const uiFallback = { screen: defaultState.screen, overlay: null, openDrink: defaultState.openDrink, activeCandidate: 0, activeCandidateId: null, o1: defaultState.o1, o2: defaultState.o2, ownershipChoice: defaultState.ownershipChoice, brew: null, journalDate: null, activeRecordId: null };
   const selectionFallback = { sessionId: null, candidates: [], reply: '', need: defaultState.need, decisionVersionId: null, decisionJobId: null, decisionStatus: 'not_requested', selectionAnswer: null, followupQuestions: [], questionStatus: 'idle', questionDecisionVersionId: null, merchantReplyIds: {}, merchantReplies: {}, rejudgeJobId: null, lastDecisionDelta: null, deltaStatus: 'idle', jobIds: {} };
   const postPurchaseFallback = { warehouse: defaultState.warehouse, journalRecords: defaultState.journalRecords, history: [], selectedTeaId: null };
-  if (!localStorage.getItem(GuanchaStores.selectionBridge.key) && localStorage.getItem('guancha-prototype-v2')) {
-    const legacy = GuanchaStores.legacy.load() || {};
-    GuanchaStores.uiSession.save(legacy);
-    GuanchaStores.selectionBridge.save(legacy);
-    const legacyHistory = (Array.isArray(legacy.history) ? legacy.history : []).map(item => {
-      if (!item || typeof item !== 'object' || !item.winner) return item;
-      const { winner, ...rest } = item;
-      return { ...rest, selected_candidate_name: winner };
-    });
-    GuanchaStores.localPostPurchase.save({ warehouse: legacy.warehouse, journalRecords: legacy.journalRecords, history: legacyHistory, selectedTeaId: legacy.selectedTeaId || null });
-    GuanchaStores.legacy.clear();
-  }
+  GuanchaStores.migrateLegacy();
   const ui = GuanchaStores.uiSession.load(uiFallback);
   const bridge = GuanchaStores.selectionBridge.load(selectionFallback);
   const postPurchase = GuanchaStores.localPostPurchase.load(postPurchaseFallback);
@@ -856,9 +843,9 @@ function tabbar() {
 }
 function historyCard(item, index) {
   const artClass = index === 1 ? 'ref-art--history-2' : index === 2 ? 'ref-art--history-3' : 'ref-art--history';
-  return `<button class="history-item" data-action="open-history" aria-label="查看${escapeHtml(item.name)}的选茶记录">
+  return `<button class="history-item" data-action="open-history" aria-label="查看选茶记录">
     <span class="history-art ref-art ${artClass}" aria-hidden="true"></span>
-    <div><div class="history-meta">${item.date} ・ ${escapeHtml(item.purpose)}</div><div class="history-name">${escapeHtml(item.name)}</div><div class="history-status">AI 优先：${escapeHtml(item.recommended_candidate_name || '未记录')} · 你选择：${escapeHtml(item.selected_candidate_name || item.winner || '未记录')}</div><div class="history-tags"><span>${escapeHtml(item.flavor)}</span><span>${escapeHtml(item.feel)}</span></div></div>
+    <div><div class="history-meta">${item.date}</div><div class="history-name">选茶结果</div><div class="history-status">AI 优先候选${escapeHtml(item.recommended_candidate_label || '未记录')} · 你选择候选${escapeHtml(item.selected_candidate_label || '未记录')}</div></div>
     <span class="history-arrow">›</span>
   </button>`;
 }
@@ -1510,8 +1497,8 @@ function addSelectionHistory(candidate) {
   if (!candidate) return;
   const identity = GuanchaAdapters.buildSelectionHistoryIdentity({ candidates: state.candidates, selectedCandidate: candidate });
   const selectedId = candidateIdentity(candidate);
-  const exists=state.history.some(item=>(item.selected_candidate_id || item.winner)===selectedId || item.selected_candidate_name===candidate.name);
-  if (!exists) state.history.unshift({ date:'08.04', purpose:state.need.purpose, name:`${candidate.name}・${state.candidates[1]?.name || '花香红茶'}`, ...identity, flavor:state.need.taste, feel:'清甜', art:candidate.art || ART.can });
+  const exists=state.history.some(item=>item.selected_candidate_id===selectedId);
+  if (!exists) state.history.unshift({ date:'08.04', ...identity });
   saveState();
 }
 function setFeedback(field, value) {

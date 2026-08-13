@@ -8,25 +8,6 @@
     try { global.localStorage.setItem(key, JSON.stringify(value)); return true; } catch { return false; }
   }
   function clone(value) { return global.structuredClone ? global.structuredClone(value) : JSON.parse(JSON.stringify(value)); }
-  function createStore(key, version, migrate) {
-    return {
-      key,
-      load(fallback) {
-        const raw = safeRead(key, null);
-        if (!raw || typeof raw !== 'object') return clone(fallback);
-        try { return migrate(raw, fallback); } catch { return clone(fallback); }
-      },
-      save(value) { return safeWrite(key, { schemaVersion: version, ...value }); },
-    };
-  }
-  function withVersion(version) {
-    return (raw, fallback) => {
-      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return clone(fallback);
-      const payload = { ...raw };
-      delete payload.schemaVersion;
-      return { ...clone(fallback), ...payload, schemaVersion: version };
-    };
-  }
   const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   const replyStatus = new Set(['submitted', 'parsed', 'failed']);
   const processingStatus = new Set(['queued', 'processing', 'completed', 'failed']);
@@ -161,6 +142,96 @@
       save(value) { return safeWrite(key, sanitize(value)); },
     };
   }
+  function boundedString(value, limit = 160) { return typeof value === 'string' && value.length <= limit ? value : null; }
+  function boundedNumber(value, minimum, maximum) { return typeof value === 'number' && Number.isFinite(value) && value >= minimum && value <= maximum ? value : null; }
+  const teaIdPattern = /^(?:tea-\d{1,16}|spring|peony|puer)$/;
+  const recordIdPattern = /^(?:record-\d{1,16}|demo-\d{4})$/;
+  const brewSourcePattern = /^(?:(?:record|brew)-[a-z0-9-]{1,40}|[0-9a-f]{8}-[0-9a-f-]{27})$/i;
+  const preferenceTargetTypes = new Set(['tea-style','aroma','roast','bitterness','astringency','sweetness','mouthfeel','aftertaste','salivation','finish']);
+  const preferencePolarities = new Set(['positive','negative']);
+  const preferenceSources = new Set(['tea','brewing','uncertain']);
+  function safeStringArray(value, limit = 8, itemLimit = 200) {
+    return (Array.isArray(value) ? value : []).slice(0, limit).flatMap(item => {
+      const safe = boundedString(item, itemLimit); return safe === null ? [] : [safe];
+    });
+  }
+  function warehouseAnchor(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value) || !teaIdPattern.test(value.id || '')) return null;
+    const result = { id: value.id };
+    for (const field of ['name','product_name','type','tea_category','tea_subtype','origin','roast_or_style','aroma','source','lastBrew']) {
+      const safe = boundedString(value[field], field === 'name' || field === 'product_name' ? 120 : 200); if (safe !== null) result[field] = safe;
+    }
+    if (['drinking','paused','finished'].includes(value.status)) result.status = value.status;
+    if (['can','gaiwan','cup','bag'].includes(value.art)) result.art = value.art;
+    if (Number.isInteger(value.records) && value.records >= 0 && value.records <= 10000) result.records = value.records;
+    for (const field of ['extraction_version_id','candidate_id','sourceDecisionId']) { const safe = safeUuid(value[field]); if (safe) result[field] = safe; }
+    if (isIsoTimestamp(value.joined_at)) result.joined_at = value.joined_at;
+    result.facts = safeStringArray(value.facts, 8, 200);
+    result.risks = safeStringArray(value.risks, 8, 200);
+    result.risk_flags = safeStringArray(value.risk_flags, 8, 64).filter(item => /^[a-z0-9_-]+$/i.test(item));
+    return result;
+  }
+  function journalAnchor(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value) || !recordIdPattern.test(value.id || '') || !teaIdPattern.test(value.teaId || '') || !/^\d{4}-\d{2}-\d{2}$/.test(value.date || '')) return null;
+    const result = { id: value.id, date: value.date, teaId: value.teaId };
+    result.infusions = (Array.isArray(value.infusions) ? value.infusions : []).slice(0, 20).flatMap(item => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+      const infusion = {};
+      for (const field of ['number','suggested','actual']) { const safe = boundedNumber(item[field], 0, 600); if (safe !== null) infusion[field] = safe; }
+      return Object.keys(infusion).length ? [infusion] : [];
+    });
+    const plan = value.plan && typeof value.plan === 'object' && !Array.isArray(value.plan) ? value.plan : {};
+    result.plan = Object.fromEntries(['ware','water','grams','temp'].flatMap(field => { const safe = boundedString(plan[field], 40); return safe === null ? [] : [[field, safe]]; }));
+    const feedback = value.feedback && typeof value.feedback === 'object' && !Array.isArray(value.feedback) ? value.feedback : {};
+    result.feedback = {};
+    for (const field of ['taste','strength','impression','repurchase']) { const safe = boundedString(feedback[field], field === 'impression' ? 500 : 80); if (safe !== null) result.feedback[field] = safe; }
+    result.feedback.tags = safeStringArray(feedback.tags, 3, 40);
+    result.feedback.aroma = safeStringArray(feedback.aroma, 3, 40);
+    const score = boundedNumber(feedback.score, 1, 5); if (score !== null) result.feedback.score = score;
+    const advanced = feedback.advanced && typeof feedback.advanced === 'object' && !Array.isArray(feedback.advanced) ? feedback.advanced : {};
+    result.feedback.advanced = Object.fromEntries(['回甘','生津','余韵'].flatMap(field => { const safe = boundedString(advanced[field], 80); return safe === null ? [] : [[field, safe]]; }));
+    for (const field of ['suggestion','createdAt']) { const safe = boundedString(value[field], 200); if (safe !== null) result[field] = safe; }
+    return result;
+  }
+  function historyAnchor(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value) || !/^\d{2}\.\d{2}$/.test(value.date || '')) return null;
+    const result = { date: value.date };
+    for (const field of ['recommended_candidate_id','selected_candidate_id']) {
+      const safe = safeUuid(value[field]) || safeLocalId(value[field], localCandidatePattern); if (safe) result[field] = safe;
+    }
+    if (/^[A-E]$/.test(value.recommended_candidate_label)) result.recommended_candidate_label = value.recommended_candidate_label;
+    if (/^[A-E]$/.test(value.selected_candidate_label)) result.selected_candidate_label = value.selected_candidate_label;
+    else if (/^[A-E]$/.test(value.winner)) result.selected_candidate_label = value.winner;
+    return Object.keys(result).length > 1 ? result : null;
+  }
+  function postPurchaseStore() {
+    const key = 'guancha.local-post-purchase.v1';
+    function sanitize(value) {
+      const input = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+      const selectedTeaId = teaIdPattern.test(input.selectedTeaId || '') ? input.selectedTeaId : null;
+      return { schemaVersion: 2,
+        warehouse: (Array.isArray(input.warehouse) ? input.warehouse : []).slice(0, 100).map(warehouseAnchor).filter(Boolean),
+        journalRecords: (Array.isArray(input.journalRecords) ? input.journalRecords : []).slice(-365).map(journalAnchor).filter(Boolean),
+        history: (Array.isArray(input.history) ? input.history : []).slice(0, 100).map(historyAnchor).filter(Boolean),
+        selectedTeaId,
+      };
+    }
+    return { key, load(fallback) { const raw = safeRead(key, null); if (!raw || typeof raw !== 'object' || Array.isArray(raw)) { if (global.localStorage.getItem(key)) global.localStorage.removeItem(key); return clone(fallback); } const cleaned = sanitize(raw); safeWrite(key, cleaned); return { ...clone(fallback), ...cleaned }; }, save(value) { return safeWrite(key, sanitize(value)); } };
+  }
+  function preferenceEvidenceStore() {
+    const key = 'guancha.preference-evidence.v1';
+    function itemAnchor(item) {
+      if (!item || typeof item !== 'object' || Array.isArray(item) || item.confidence !== 'low' || !safeUuid(item.id) || !preferenceTargetTypes.has(item.target_type) || !/^[a-z0-9-]{1,64}$/.test(item.target_value || '') || !preferencePolarities.has(item.polarity) || !preferenceSources.has(item.issue_source) || !brewSourcePattern.test(item.source_brew_session_id || '') || !isIsoTimestamp(item.created_at)) return null;
+      return { id: item.id, target_type: item.target_type, target_value: item.target_value, polarity: item.polarity, confidence: 'low', issue_source: item.issue_source, source_brew_session_id: item.source_brew_session_id, created_at: item.created_at };
+    }
+    function sanitize(value) {
+      const input = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+      const cutoff = Date.now() - 90 * 24 * 60 * 60 * 1000; const seen = new Set();
+      const items = (Array.isArray(input.items) ? input.items : []).flatMap(item => { const safe = itemAnchor(item); if (!safe || seen.has(safe.source_brew_session_id) || Date.parse(safe.created_at) < cutoff) return []; seen.add(safe.source_brew_session_id); return [safe]; }).slice(-12);
+      return { schemaVersion: 2, items };
+    }
+    return { key, load(fallback) { const raw = safeRead(key, null); if (!raw || typeof raw !== 'object' || Array.isArray(raw)) { if (global.localStorage.getItem(key)) global.localStorage.removeItem(key); return clone(fallback); } const cleaned = sanitize(raw); safeWrite(key, cleaned); return { ...clone(fallback), ...cleaned }; }, save(value) { return safeWrite(key, sanitize(value)); } };
+  }
   const pendingImageDatabase = 'guancha.pending-images.v1';
   const pendingImageStore = 'images';
   function withPendingImageStore(mode, callback) {
@@ -190,22 +261,22 @@
   const stores = {
     uiSession: uiSessionStore(),
     selectionBridge: selectionBridgeStore(),
-    localPostPurchase: createStore('guancha.local-post-purchase.v1', 1, withVersion(1)),
-    preferenceEvidence: createStore('guancha.preference-evidence.v1', 1, (raw, fallback) => {
-      if (!raw || typeof raw !== 'object' || !Array.isArray(raw.items)) return clone(fallback);
-      const cutoff = Date.now() - 90 * 24 * 60 * 60 * 1000;
-      const seen = new Set();
-      const items = raw.items.filter((item) => {
-        if (!item || typeof item !== 'object' || item.confidence !== 'low' || typeof item.source_brew_session_id !== 'string' || seen.has(item.source_brew_session_id)) return false;
-        const created = Date.parse(item.created_at || '');
-        if (Number.isFinite(created) && created < cutoff) return false;
-        seen.add(item.source_brew_session_id);
-        return true;
-      }).slice(-12);
-      return { items, schemaVersion: 1 };
-    }),
+    localPostPurchase: postPurchaseStore(),
+    preferenceEvidence: preferenceEvidenceStore(),
     pendingImages,
     legacy: { load: () => safeRead('guancha-prototype-v2', null), clear: () => global.localStorage.removeItem('guancha-prototype-v2') },
+  };
+  stores.migrateLegacy = () => {
+    if (!global.localStorage.getItem('guancha-prototype-v2')) return false;
+    try {
+      const legacy = stores.legacy.load() || {};
+      if (!global.localStorage.getItem(stores.uiSession.key)) stores.uiSession.save(legacy);
+      if (!global.localStorage.getItem(stores.selectionBridge.key)) stores.selectionBridge.save(legacy);
+      if (!global.localStorage.getItem(stores.localPostPurchase.key)) stores.localPostPurchase.save(legacy);
+      return true;
+    } finally {
+      stores.legacy.clear();
+    }
   };
   stores.clearAll = () => {
     [stores.uiSession.key, stores.selectionBridge.key, stores.localPostPurchase.key, stores.preferenceEvidence.key, 'guancha-prototype-v2'].forEach((key) => global.localStorage.removeItem(key));

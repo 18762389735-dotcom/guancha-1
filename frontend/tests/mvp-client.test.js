@@ -88,19 +88,19 @@ test('API client submits brew feedback through the idempotent server bridge', as
 test('warehouse storage persists added MVP tea records', () => {
   const { window } = browser();
   load(window, path.join(root, 'stores.js'));
-  window.GuanchaStores.localPostPurchase.save({ warehouse: [{ id: 'tea-1', product_name: '铁观音', extraction_version_id: 'version-1' }] });
+  window.GuanchaStores.localPostPurchase.save({ warehouse: [{ id: 'tea-1', product_name: '铁观音', extraction_version_id: '11111111-1111-4111-8111-111111111111' }] });
   const loaded = window.GuanchaStores.localPostPurchase.load({ warehouse: [] });
   assert.equal(loaded.warehouse[0].product_name, '铁观音');
-  assert.equal(loaded.warehouse[0].extraction_version_id, 'version-1');
+  assert.equal(loaded.warehouse[0].extraction_version_id, '11111111-1111-4111-8111-111111111111');
 });
 
 test('preference evidence store safely deduplicates and bounds local feedback', () => {
   const { window } = browser();
   load(window, path.join(root, 'stores.js'));
   window.GuanchaStores.preferenceEvidence.save({ items: [
-    { source_brew_session_id: 'brew-1', confidence: 'low', created_at: new Date().toISOString() },
-    { source_brew_session_id: 'brew-1', confidence: 'low', created_at: new Date().toISOString() },
-    { source_brew_session_id: 'brew-2', confidence: 'high', created_at: new Date().toISOString() },
+    { id: '11111111-1111-4111-8111-111111111111', target_type: 'roast', target_value: 'heavy-roast', polarity: 'negative', issue_source: 'tea', source_brew_session_id: 'brew-1', confidence: 'low', created_at: new Date().toISOString() },
+    { id: '22222222-2222-4222-8222-222222222222', target_type: 'roast', target_value: 'heavy-roast', polarity: 'negative', issue_source: 'tea', source_brew_session_id: 'brew-1', confidence: 'low', created_at: new Date().toISOString() },
+    { id: '33333333-3333-4333-8333-333333333333', target_type: 'roast', target_value: 'heavy-roast', polarity: 'negative', issue_source: 'tea', source_brew_session_id: 'brew-2', confidence: 'high', created_at: new Date().toISOString() },
   ] });
   const loaded = window.GuanchaStores.preferenceEvidence.load({ items: [] });
   assert.equal(loaded.items.length, 1);

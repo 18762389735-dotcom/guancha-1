@@ -77,9 +77,9 @@
     const recommended = candidates.find(item => Number(item.decision?.overall_order) === 1) || null;
     return {
       recommended_candidate_id: candidateIdentity(recommended),
-      recommended_candidate_name: recommended?.name || null,
+      recommended_candidate_label: /^[A-E]$/.test(recommended?.letter) ? recommended.letter : null,
       selected_candidate_id: candidateIdentity(selectedCandidate),
-      selected_candidate_name: selectedCandidate?.name || null,
+      selected_candidate_label: /^[A-E]$/.test(selectedCandidate?.letter) ? selectedCandidate.letter : null,
     };
   }
   function buildPreferenceReference({ o1 = {}, o2 = {}, onboardingStatus = 'completed' } = {}) {

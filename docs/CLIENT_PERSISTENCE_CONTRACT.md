@@ -34,14 +34,23 @@ be lost on refresh by design.
 
 `guancha.ui-session.v1` stores only closed navigation/onboarding state and the
 stable active-candidate identity. Preference controls are stored only as bounded
-closed selections. `guancha.preference-evidence.v1` remains a bounded, explicit
-low-confidence evidence store. Neither accepts MerchantReply content.
+closed selections. `guancha.preference-evidence.v1` stores at most twelve
+90-day low-confidence anchors: UUID evidence id, closed target type/polarity/
+issue source, normalized ASCII target token, safe brew-session id, and ISO
+timestamp. Save and load use the same projection, and load rewrites the backing
+value. Neither store accepts unknown, nested, or MerchantReply content.
 
 `guancha.local-post-purchase.v1` is a separate, explicit user-content contract
-for the local tea warehouse and brewing journal. It must not receive MerchantReply
-or selection presentation objects.
+for the local tea warehouse and brewing journal. Warehouse and journal records
+are rebuilt from bounded field allowlists; unknown and nested selection objects
+are discarded. Selection history contains only date, safe candidate ids, and
+A-E recommended/selected labels. It contains no Need, candidate name, merchant
+reply, answer, evidence, reason, or Decision presentation.
+
+The legacy `guancha-prototype-v2` key is never consulted for onboarding after
+startup. Missing new stores may receive a projection through their serializers,
+then the legacy key is removed in all cases. Existing new stores always win.
 
 IndexedDB `guancha.pending-images.v1` is a temporary upload-resume cache. It is
 not long-lived profile state. Browser/session TTL and eviction policy remain a
 documented P2 boundary; Phase 15 does not change its schema.
-

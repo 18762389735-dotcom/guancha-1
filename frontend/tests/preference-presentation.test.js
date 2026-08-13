@@ -61,12 +61,12 @@ test('candidate identity survives server reorder for one two and five cards', ()
 
 test('history identity separates AI top candidate from user selection', () => {
   const candidates = [
-    { serverCandidateId: 'A', name: 'Tea A', decision: { overall_order: 1 } },
-    { serverCandidateId: 'B', name: 'Tea B', decision: { overall_order: 2 } },
+    { serverCandidateId: 'A', letter: 'A', name: 'Tea A', decision: { overall_order: 1 } },
+    { serverCandidateId: 'B', letter: 'B', name: 'Tea B', decision: { overall_order: 2 } },
   ];
   assert.deepEqual(JSON.parse(JSON.stringify(adapters().buildSelectionHistoryIdentity({ candidates, selectedCandidate: candidates[1] }))), {
-    recommended_candidate_id: 'A', recommended_candidate_name: 'Tea A',
-    selected_candidate_id: 'B', selected_candidate_name: 'Tea B',
+    recommended_candidate_id: 'A', recommended_candidate_label: 'A',
+    selected_candidate_id: 'B', selected_candidate_label: 'B',
   });
 });
 
