@@ -53,6 +53,7 @@ const defaultState = {
   need: { taste: '清爽花香', purpose: '送礼', budget: '150–300 元' },
   candidates: [],
   activeCandidate: 0,
+  activeCandidateId: null,
   reply: '',
   history: [],
   sourceFor: null,
@@ -111,19 +112,28 @@ function applyInitialRoute(next) {
   return next;
 }
 function loadState() {
-  const uiFallback = { screen: defaultState.screen, overlay: null, openDrink: defaultState.openDrink, activeCandidate: 0, o1: defaultState.o1, o2: defaultState.o2, ownershipChoice: defaultState.ownershipChoice, brew: null, journalDate: null, activeRecordId: null };
+  const uiFallback = { screen: defaultState.screen, overlay: null, openDrink: defaultState.openDrink, activeCandidate: 0, activeCandidateId: null, o1: defaultState.o1, o2: defaultState.o2, ownershipChoice: defaultState.ownershipChoice, brew: null, journalDate: null, activeRecordId: null };
   const selectionFallback = { sessionId: null, candidates: [], reply: '', need: defaultState.need, decisionVersionId: null, decisionJobId: null, decisionStatus: 'not_requested', selectionAnswer: null, followupQuestions: [], questionStatus: 'idle', questionDecisionVersionId: null, merchantReplyIds: {}, merchantReplies: {}, rejudgeJobId: null, lastDecisionDelta: null, deltaStatus: 'idle', jobIds: {} };
   const postPurchaseFallback = { warehouse: defaultState.warehouse, journalRecords: defaultState.journalRecords, history: [], selectedTeaId: null };
+  if (!localStorage.getItem(GuanchaStores.selectionBridge.key) && localStorage.getItem('guancha-prototype-v2')) {
+    const legacy = GuanchaStores.legacy.load() || {};
+    GuanchaStores.uiSession.save(legacy);
+    GuanchaStores.selectionBridge.save(legacy);
+    const legacyHistory = (Array.isArray(legacy.history) ? legacy.history : []).map(item => {
+      if (!item || typeof item !== 'object' || !item.winner) return item;
+      const { winner, ...rest } = item;
+      return { ...rest, selected_candidate_name: winner };
+    });
+    GuanchaStores.localPostPurchase.save({ warehouse: legacy.warehouse, journalRecords: legacy.journalRecords, history: legacyHistory, selectedTeaId: legacy.selectedTeaId || null });
+    GuanchaStores.legacy.clear();
+  }
   const ui = GuanchaStores.uiSession.load(uiFallback);
   const bridge = GuanchaStores.selectionBridge.load(selectionFallback);
   const postPurchase = GuanchaStores.localPostPurchase.load(postPurchaseFallback);
   if (localStorage.getItem(GuanchaStores.selectionBridge.key) || localStorage.getItem(GuanchaStores.localPostPurchase.key)) {
     return applyInitialRoute(normalizeState({ ...structuredClone(defaultState), ...ui, ...bridge, ...postPurchase, overlay: null, sourceFor: null }));
   }
-  try {
-    const saved = GuanchaStores.legacy.load();
-    return applyInitialRoute(normalizeState(saved ? { ...structuredClone(defaultState), ...saved, overlay: null, sourceFor: null } : structuredClone(defaultState)));
-  } catch { return applyInitialRoute(structuredClone(defaultState)); }
+  return applyInitialRoute(structuredClone(defaultState));
 }
 function normalizeCandidate(candidate, index) {
   const legacyImageCount = Array.isArray(candidate.images) ? candidate.images.length : Number(candidate.images) || 0;
@@ -152,6 +162,8 @@ function normalizeState(value) {
     else delete next.activeSelectionFlow;
   }
   next.candidates = (Array.isArray(next.candidates) ? next.candidates : []).slice(0, candidateLimit()).map(normalizeCandidate);
+  next.activeCandidate = GuanchaAdapters.resolveActiveCandidateIndex(next.candidates, next.activeCandidateId, next.activeCandidate);
+  next.activeCandidateId = candidateIdentity(next.candidates[next.activeCandidate]);
   if (['analysis', 'result', 'rejudge'].includes(next.screen)) next.screen = 'candidates';
   return next;
 }
@@ -186,7 +198,8 @@ function candidateLimit() { return Math.min(PRODUCT_LIMITS.maxCandidates, public
 function imageLimit() { return Math.min(PRODUCT_LIMITS.maxImagesPerCandidate, publicLimits().maxImagesPerCandidate); }
 
 function saveState() {
-  GuanchaStores.uiSession.save({ screen: state.screen, overlay: null, openDrink: state.openDrink || '', activeCandidate: state.activeCandidate, o1: state.o1, o2: state.o2, ownershipChoice: state.ownershipChoice, brew: state.brew, journalDate: state.journalDate || null, activeRecordId: state.activeRecordId || null, activeSelectionFlow: state.activeSelectionFlow === true, preferenceFlow: state.preferenceFlow || null });
+  syncActiveCandidate();
+  GuanchaStores.uiSession.save({ screen: state.screen, openDrink: state.openDrink || '', activeCandidateId: state.activeCandidateId, o1: state.o1, o2: state.o2, ownershipChoice: state.ownershipChoice, activeSelectionFlow: state.activeSelectionFlow === true, preferenceFlow: state.preferenceFlow || null });
   const persistedMerchantReplies = Object.fromEntries(Object.entries(state.merchantReplies || {}).map(([questionId, reply]) => [questionId, Object.fromEntries(['id','selection_session_id','decision_version_id','followup_question_id','candidate_id','status','processing_status','parse_status','created_at','updated_at'].filter(key => reply?.[key] != null).map(key => [key, reply[key]]))]));
   GuanchaStores.selectionBridge.save({ sessionId: state.sessionId || null, candidates: state.candidates, reply: '', need: state.need, decisionVersionId: state.decisionVersionId || null, decisionJobId: state.decisionJobId || null, decisionStatus: state.decisionStatus || 'not_requested', selectionAnswer: state.selectionAnswer || null, followupQuestions: state.followupQuestions || [], questionStatus: state.questionStatus || 'idle', questionDecisionVersionId: state.questionDecisionVersionId || null, merchantReplyIds: state.merchantReplyIds || {}, merchantReplies: persistedMerchantReplies, rejudgeJobId: state.rejudgeJobId || null, lastDecisionDelta: state.lastDecisionDelta || null, deltaStatus: state.deltaStatus || 'idle', jobIds: state.jobIds || {} });
   GuanchaStores.localPostPurchase.save({ warehouse: state.warehouse, journalRecords: state.journalRecords, history: state.history, selectedTeaId: state.selectedTeaId || null });
@@ -266,6 +279,7 @@ function applyExtraction(candidate, extraction) {
   });
 }
 function applySessionDecision(decision) {
+  const activeId = candidateIdentity(currentCandidate());
   const decisions = Array.isArray(decision?.candidate_decisions) ? decision.candidate_decisions.slice() : [];
   const byCandidateId = new Map(state.candidates.map((candidate) => [candidate.serverCandidateId, candidate]));
   const decidedIds = new Set();
@@ -281,7 +295,7 @@ function applySessionDecision(decision) {
     ...decisions.map((item) => byCandidateId.get(item.candidate_id)).filter(Boolean),
     ...state.candidates.filter((candidate) => !decidedIds.has(candidate.serverCandidateId)),
   ];
-  state.activeCandidate = Math.max(0, Math.min(state.activeCandidate, state.candidates.length - 1));
+  syncActiveCandidate(activeId);
 }
 function clearStaleRemoteSelection() {
   state.sessionId = null;
@@ -416,6 +430,7 @@ async function resumeLiveBackendState() {
   if (!apiClient.isConfigured || !state.sessionId) return;
   try {
     const snapshot = await apiClient.getSelectionSnapshot(state.sessionId);
+    const activeId = state.activeCandidateId || candidateIdentity(currentCandidate());
     const recoveryScreen = GuanchaAdapters.activeRecoveryScreen(snapshot);
     const pendingLocal = state.candidates.filter(candidate => !candidate.serverCandidateId && (candidate.images || []).some(image => image.localOnly));
     state.candidates = snapshot.candidates.map((remote, index) => ({
@@ -425,6 +440,9 @@ async function resumeLiveBackendState() {
       serverImageId: remote.images?.at(-1)?.id || null, jobId: remote.images?.at(-1)?.current_job_id || null,
       extractionStatus: remote.current_extraction?.status || remote.images?.at(-1)?.current_job_status || remote.images?.at(-1)?.status || 'queued', extraction: null,
     })).concat(pendingLocal);
+    syncActiveCandidate(activeId);
+    const serverNeed = snapshot.session?.need || {};
+    state.need = { taste: serverNeed.taste_text || '', purpose: serverNeed.purpose_text || '', budget: serverNeed.budget_text || '' };
     state.decisionVersionId = snapshot.current_decision_id || null;
     state.selectionAnswer = null;
     // The server owns question/reply/rejudge progress. Browser storage only
@@ -716,6 +734,11 @@ function trackResultView() {
     metadata: { candidate_count: state.candidates.length, screen: state.screen },
   });
 }
+function candidateIdentity(candidate) { return GuanchaAdapters.candidateIdentity(candidate); }
+function syncActiveCandidate(anchor = state.activeCandidateId) {
+  state.activeCandidate = GuanchaAdapters.resolveActiveCandidateIndex(state.candidates, anchor, state.activeCandidate);
+  state.activeCandidateId = candidateIdentity(state.candidates[state.activeCandidate]);
+}
 
 function render() {
   // Most interactions re-render the current screen so that selected states
@@ -835,7 +858,7 @@ function historyCard(item, index) {
   const artClass = index === 1 ? 'ref-art--history-2' : index === 2 ? 'ref-art--history-3' : 'ref-art--history';
   return `<button class="history-item" data-action="open-history" aria-label="查看${escapeHtml(item.name)}的选茶记录">
     <span class="history-art ref-art ${artClass}" aria-hidden="true"></span>
-    <div><div class="history-meta">${item.date} ・ ${escapeHtml(item.purpose)}</div><div class="history-name">${escapeHtml(item.name)}</div><div class="history-status">优先推荐：${escapeHtml(item.winner)}</div><div class="history-tags"><span>${escapeHtml(item.flavor)}</span><span>${escapeHtml(item.feel)}</span></div></div>
+    <div><div class="history-meta">${item.date} ・ ${escapeHtml(item.purpose)}</div><div class="history-name">${escapeHtml(item.name)}</div><div class="history-status">AI 优先：${escapeHtml(item.recommended_candidate_name || '未记录')} · 你选择：${escapeHtml(item.selected_candidate_name || item.winner || '未记录')}</div><div class="history-tags"><span>${escapeHtml(item.flavor)}</span><span>${escapeHtml(item.feel)}</span></div></div>
     <span class="history-arrow">›</span>
   </button>`;
 }
@@ -1014,7 +1037,7 @@ function renderResult() {
       || state.lastDecisionDelta?.new_decision_version_id === state.decisionVersionId
       || (state.questionStatus === 'not-needed' && state.questionDecisionVersionId === state.decisionVersionId);
     const sensory = answerCandidate?.sensory_interpretations || [];
-    const preferenceReference = GuanchaAdapters.buildPreferenceReference({ o1: state.o1, o2: state.o2 });
+    const preferenceReference = GuanchaAdapters.buildPreferenceReference({ o1: state.o1, o2: state.o2, onboardingStatus: onboardingStatus() });
     const personalFit = GuanchaAdapters.buildPersonalFitPresentation({ need: state.need, sensoryInterpretations: sensory, preferenceReference });
     const fitLines = personalFit.lines.map((line) => `<li>${escapeHtml(line)}</li>`).join('');
     const fitCaveat = GuanchaAdapters.sensoryNeedMatch(candidate.decision) <= 0
@@ -1245,6 +1268,7 @@ async function addCandidate(files) {
     state.candidates.push(candidate);
     state.activeSelectionFlow = true;
     state.activeCandidate = state.candidates.length - 1;
+    state.activeCandidateId = candidateIdentity(candidate);
     state.decisionVersionId = null;
     saveState();
     return { ok: true, candidate, converted: prepared.converted };
@@ -1350,9 +1374,14 @@ document.addEventListener('click', event => {
   if (action === 'go-o1') return setScreen('o1');
   if (action === 'go-o2') return setScreen('o2');
   if (action === 'skip-preferences') {
+    const isFirstOnboarding = state.preferenceFlow === 'onboarding';
     productAnalytics.track('onboarding_skipped', { metadata: { source: state.preferenceFlow || 'settings', screen: 'o1' } });
     GuanchaOnboarding.markStatus(localStorage, 'skipped');
-    const next = state.preferenceFlow === 'onboarding' ? 'candidates' : 'home';
+    if (isFirstOnboarding) {
+      state.o1 = { tea: [], coffee: [], milk: [], juice: [] };
+      state.o2 = { ...state.o2, flavors: [] };
+    }
+    const next = isFirstOnboarding ? 'candidates' : 'home';
     state.preferenceFlow = null;
     showToast('已跳过口味设置，本次需求仍优先');
     return setScreen(next);
@@ -1379,7 +1408,7 @@ document.addEventListener('click', event => {
   if (action === 'choose-camera') { state.overlay='camera'; return render(); }
   if (action === 'capture-camera') return captureCamera();
   if (action === 'choose-album') { stopCamera(); state.overlay=null; render(); albumInput.click(); return; }
-  if (action === 'remove-candidate') { const [removed]=state.candidates.splice(Number(target.dataset.index),1); if (removed?.serverCandidateId && apiClient.isConfigured) apiClient.deleteCandidate(removed.serverCandidateId).catch(() => {}); (removed?.images || []).forEach(image=>{ const runtime=runtimeImages.get(image.id); if(runtime) URL.revokeObjectURL(runtime.url); runtimeImages.delete(image.id); pendingImageStore.remove(image.id); }); renumberCandidates(); state.activeCandidate=Math.max(0,Math.min(state.activeCandidate,state.candidates.length-1)); state.decisionVersionId=null; saveState(); return render(); }
+  if (action === 'remove-candidate') { const activeId=candidateIdentity(currentCandidate()); const [removed]=state.candidates.splice(Number(target.dataset.index),1); if (removed?.serverCandidateId && apiClient.isConfigured) apiClient.deleteCandidate(removed.serverCandidateId).catch(() => {}); (removed?.images || []).forEach(image=>{ const runtime=runtimeImages.get(image.id); if(runtime) URL.revokeObjectURL(runtime.url); runtimeImages.delete(image.id); pendingImageStore.remove(image.id); }); renumberCandidates(); syncActiveCandidate(activeId); state.decisionVersionId=null; saveState(); return render(); }
   if (action === 'start-analysis') return startMvpAnalysis();
   if (action === 'retry-analysis') return retryMvpAnalysis();
   if (action === 'retry-decision') { state.decisionJobId = null; state.decisionStatus = 'not_requested'; saveState(); return maybeStartSessionDecision(); }
@@ -1479,8 +1508,10 @@ cameraInput.addEventListener('change', async event => { if (event.target.files?.
 candidateImageInput.addEventListener('change', async event => { if (pendingImageCandidateId && event.target.files?.length) await appendCandidateImage(pendingImageCandidateId, event.target.files); pendingImageCandidateId=null; event.target.value=''; });
 function addSelectionHistory(candidate) {
   if (!candidate) return;
-  const exists=state.history.some(item=>item.winner===candidate.name);
-  if (!exists) state.history.unshift({ date:'08.04', purpose:state.need.purpose, name:`${candidate.name}・${state.candidates[1]?.name || '花香红茶'}`, winner:candidate.name, flavor:state.need.taste, feel:'清甜', art:candidate.art || ART.can });
+  const identity = GuanchaAdapters.buildSelectionHistoryIdentity({ candidates: state.candidates, selectedCandidate: candidate });
+  const selectedId = candidateIdentity(candidate);
+  const exists=state.history.some(item=>(item.selected_candidate_id || item.winner)===selectedId || item.selected_candidate_name===candidate.name);
+  if (!exists) state.history.unshift({ date:'08.04', purpose:state.need.purpose, name:`${candidate.name}・${state.candidates[1]?.name || '花香红茶'}`, ...identity, flavor:state.need.taste, feel:'清甜', art:candidate.art || ART.can });
   saveState();
 }
 function setFeedback(field, value) {
@@ -1519,7 +1550,7 @@ async function analyzeBrewRecord(record, tea) {
   try { const result=await apiClient.analyzeBrewFeedback(payload,payload.client_feedback_id); record.feedbackAnalysis=result; record.feedbackAnalysisStatus='completed'; savePreferenceEvidence(result.preference_evidence||[]); saveState(); render(); } catch { record.feedbackAnalysis=null; record.feedbackAnalysisStatus='failed'; saveState(); render(); }
 }
 function copyText(value) { navigator.clipboard?.writeText(value).then(() => showToast('已复制，可直接发给商家')).catch(() => showToast('复制失败，请手动选择文字')); }
-function slide(direction) { if (state.candidates.length < 2) return showToast('当前只有 1 款候选茶'); state.activeCandidate=(state.activeCandidate+direction+state.candidates.length)%state.candidates.length; render(); }
+function slide(direction) { if (state.candidates.length < 2) return showToast('当前只有 1 款候选茶'); state.activeCandidate=(state.activeCandidate+direction+state.candidates.length)%state.candidates.length; state.activeCandidateId=candidateIdentity(currentCandidate()); saveState(); render(); }
 function bindResultSwipe() {
   const stage = document.querySelector('#result-stage');
   if (!stage) return;

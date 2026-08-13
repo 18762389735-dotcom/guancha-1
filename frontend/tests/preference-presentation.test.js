@@ -43,6 +43,33 @@ test('controlled sensory evidence can explain a different fit without ranking', 
   assert.doesNotMatch(presentation.lines[1], /首选|排名|一定/);
 });
 
+test('skipped onboarding never builds pseudo preference references', () => {
+  const result = adapters().buildPreferenceReference({ onboardingStatus: 'skipped', o1: { tea: ['绿茶'] }, o2: { flavors: ['兰花'] } });
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), []);
+});
+
+test('candidate identity survives server reorder for one two and five cards', () => {
+  const api = adapters();
+  const one = [{ id: 'local-a', serverCandidateId: 'A' }];
+  assert.equal(api.resolveActiveCandidateIndex(one, 'A', 0), 0);
+  const two = [{ serverCandidateId: 'B' }, { serverCandidateId: 'A' }];
+  assert.equal(api.resolveActiveCandidateIndex(two, 'A', 0), 1);
+  const five = ['E','D','C','B','A'].map(serverCandidateId => ({ serverCandidateId }));
+  assert.equal(api.resolveActiveCandidateIndex(five, 'A', 0), 4);
+  assert.equal(api.resolveActiveCandidateIndex(five, 'missing', 99), 4);
+});
+
+test('history identity separates AI top candidate from user selection', () => {
+  const candidates = [
+    { serverCandidateId: 'A', name: 'Tea A', decision: { overall_order: 1 } },
+    { serverCandidateId: 'B', name: 'Tea B', decision: { overall_order: 2 } },
+  ];
+  assert.deepEqual(JSON.parse(JSON.stringify(adapters().buildSelectionHistoryIdentity({ candidates, selectedCandidate: candidates[1] }))), {
+    recommended_candidate_id: 'A', recommended_candidate_name: 'Tea A',
+    selected_candidate_id: 'B', selected_candidate_name: 'Tea B',
+  });
+});
+
 test('fit presentation uses explicit sensory and legacy need signals together', () => {
   const api = adapters();
   assert.equal(api.sensoryNeedMatch({ score_components: { explicit_sensory_need_match: 2, need_match: -1 } }), 1);

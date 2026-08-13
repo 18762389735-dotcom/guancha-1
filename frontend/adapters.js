@@ -67,7 +67,23 @@
     if (hasActiveAnalysis) return 'analysis';
     return snapshot.current_decision_id ? 'result' : 'candidates';
   }
-  function buildPreferenceReference({ o1 = {}, o2 = {} } = {}) {
+  function candidateIdentity(candidate) { return candidate?.serverCandidateId || candidate?.id || null; }
+  function resolveActiveCandidateIndex(candidates = [], activeCandidateId = null, fallbackIndex = 0) {
+    const exact = candidates.findIndex(candidate => candidateIdentity(candidate) === activeCandidateId);
+    if (exact >= 0) return exact;
+    return Math.max(0, Math.min(Number(fallbackIndex) || 0, Math.max(0, candidates.length - 1)));
+  }
+  function buildSelectionHistoryIdentity({ candidates = [], selectedCandidate = null } = {}) {
+    const recommended = candidates.find(item => Number(item.decision?.overall_order) === 1) || null;
+    return {
+      recommended_candidate_id: candidateIdentity(recommended),
+      recommended_candidate_name: recommended?.name || null,
+      selected_candidate_id: candidateIdentity(selectedCandidate),
+      selected_candidate_name: selectedCandidate?.name || null,
+    };
+  }
+  function buildPreferenceReference({ o1 = {}, o2 = {}, onboardingStatus = 'completed' } = {}) {
+    if (onboardingStatus === 'skipped') return [];
     const references = [];
     const selectedDrinks = Object.values(o1).flat().filter(Boolean).slice(0, 2);
     if (selectedDrinks.length) {
@@ -105,5 +121,5 @@
     if (preferenceReference.length) lines.push(`${preferenceReference.map((item) => item.text).join('')}这只作为低置信口味参考，不会覆盖你这次的需求。`);
     return { lines, preferenceReference };
   }
-  global.GuanchaAdapters = { actionLabels, jobToCandidateStatus, candidateToViewModel, sensoryNeedMatch, invalidateDecisionState, prepareNeedUpdate, activeRecoveryScreen, buildPreferenceReference, buildPersonalFitPresentation };
+  global.GuanchaAdapters = { actionLabels, jobToCandidateStatus, candidateToViewModel, sensoryNeedMatch, invalidateDecisionState, prepareNeedUpdate, activeRecoveryScreen, candidateIdentity, resolveActiveCandidateIndex, buildSelectionHistoryIdentity, buildPreferenceReference, buildPersonalFitPresentation };
 }(window));
