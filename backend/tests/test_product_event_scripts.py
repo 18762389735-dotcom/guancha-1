@@ -60,3 +60,17 @@ def test_export_rejects_noncanonical_ids_naive_timestamps_and_open_error_values(
     ]
     source.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
     assert export(source, destination) == 1
+
+
+def test_export_rejects_coerced_schema_and_metadata_types(tmp_path) -> None:
+    source, destination = tmp_path / "events.jsonl", tmp_path / "events.csv"
+    valid = {"schema_version": 1, "event_id": "11111111-1111-4111-8111-111111111111", "event_name": "start_selection", "anonymous_session_id": "22222222-2222-4222-8222-222222222222", "occurred_at": "2026-08-13T00:00:00+00:00", "received_at": "2026-08-13T00:00:01+00:00", "authority": "client", "metadata": {"candidate_count": 1, "has_budget": False}}
+    invalid = []
+    for index, metadata in enumerate((None, [], "", 0, False, {"candidate_count": "1"}, {"candidate_count": True}, {"has_budget": 1}), start=3):
+        invalid.append({**valid, "event_id": f"{index:08d}-3333-4333-8333-333333333333", "metadata": metadata})
+    invalid.extend([
+        {**valid, "event_id": "00000020-3333-4333-8333-333333333333", "schema_version": True},
+        {**valid, "event_id": "00000021-3333-4333-8333-333333333333", "schema_version": "1"},
+    ])
+    source.write_text("\n".join(json.dumps(row) for row in [*invalid, valid]), encoding="utf-8")
+    assert export(source, destination) == 1

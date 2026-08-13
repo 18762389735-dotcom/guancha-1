@@ -87,7 +87,7 @@ ErrorCategory = Literal[
 
 
 class EventMetadata(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     candidate_count: int | None = Field(default=None, ge=0, le=5)
     image_count: int | None = Field(default=None, ge=0, le=10)
@@ -256,7 +256,7 @@ def validate_stored_event(record: object) -> dict[str, object] | None:
         return None
     if authority == "server" and name not in SERVER_EVENT_NAMES:
         return None
-    if authority not in {"client", "server"} or record.get("schema_version") != 1:
+    if authority not in {"client", "server"} or type(record.get("schema_version")) is not int or record["schema_version"] != 1:
         return None
     try:
         if not _is_canonical_uuid(record["event_id"]) or not _is_canonical_uuid(record["anonymous_session_id"]):
@@ -266,7 +266,10 @@ def validate_stored_event(record: object) -> dict[str, object] | None:
                 return None
         if not _is_aware_iso_timestamp(record["occurred_at"]) or not _is_aware_iso_timestamp(record["received_at"]):
             return None
-        EventMetadata.model_validate(record.get("metadata") or {})
+        metadata = record.get("metadata")
+        if not isinstance(metadata, dict):
+            return None
+        validated_metadata = EventMetadata.model_validate(metadata)
         if record.get("stage") is not None and record["stage"] not in EventStage.__args__:
             return None
         if record.get("error_category") is not None and record["error_category"] not in ErrorCategory.__args__:
@@ -276,4 +279,4 @@ def validate_stored_event(record: object) -> dict[str, object] | None:
             return None
     except (KeyError, TypeError, ValueError):
         return None
-    return record
+    return {**record, "metadata": validated_metadata.model_dump(mode="json", exclude_none=True)}
