@@ -1,14 +1,14 @@
 # AI Eval Results
 
-Run at: 2026-08-12T18:28:28.283541+00:00
+Run at: 2026-08-13T00:35:32.366467+00:00
 
 This is the fixed deterministic/fixture test-set result, not real-world model accuracy.
 No Provider network call or API key access is performed.
 
 ## Totals
 
-- Total: 27
-- PASS: 24
+- Total: 29
+- PASS: 26
 - FAIL: 0
 - BLOCKED: 3
 
@@ -43,6 +43,8 @@ No Provider network call or API key access is performed.
 | REJ-03 | database_integration | Rejudge and Delta | REJUDGE_INCONSISTENT | BLOCKED |
 | ANS-01 | deterministic_unit | Decision Answer | DECISION_ANSWER_MISMATCH | PASS |
 | STATE-01 | database_integration | State Safety | DECISION_STATE_STALE | BLOCKED |
+| STATE-02 | deterministic_unit | State Safety | STATE_RECOVERY_ERROR | PASS |
+| STATE-03 | deterministic_unit | State Safety | STATE_RECOVERY_ERROR | PASS |
 
 ## By category
 
@@ -54,7 +56,7 @@ No Provider network call or API key access is performed.
 - Question: PASS 3 / FAIL 0 / BLOCKED 0
 - Rejudge and Delta: PASS 1 / FAIL 0 / BLOCKED 2
 - Sensory Translation: PASS 3 / FAIL 0 / BLOCKED 0
-- State Safety: PASS 0 / FAIL 0 / BLOCKED 1
+- State Safety: PASS 2 / FAIL 0 / BLOCKED 1
 
 ## Boundary
 

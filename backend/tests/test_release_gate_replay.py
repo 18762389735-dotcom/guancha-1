@@ -48,4 +48,5 @@ async def test_staged_analysis_returns_only_newly_accepted_jobs() -> None:
     kwargs = dict(session_id=uuid4(), client_id=uuid4(), storage=storage, task_runner=runner, provider=provider)
     assert len(await service.start_staged_extractions(**kwargs)) == 1
     assert await service.start_staged_extractions(**kwargs) == ()
+    assert (await service.list_staged_extractions(session_id=kwargs["session_id"], client_id=kwargs["client_id"]))[0].id == job_id
     assert runner.pending_count == 1

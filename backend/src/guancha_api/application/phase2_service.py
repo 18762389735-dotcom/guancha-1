@@ -193,6 +193,15 @@ class Phase2ExtractionService:
                 started.append(self._job_response(job))
         return tuple(started)
 
+    async def list_staged_extractions(
+        self, *, session_id: UUID, client_id: UUID
+    ) -> tuple[AnalysisJobResponse, ...]:
+        """Return queued response anchors without dispatching or emitting."""
+        jobs = await self.repository.list_queued_extraction_jobs_for_session(
+            session_id=session_id, client_id=client_id
+        )
+        return tuple(self._job_response(job) for job in jobs)
+
     async def delete_image(
         self, *, client_id: UUID, image_id: UUID, storage: TemporaryPrivateStorage
     ) -> None:

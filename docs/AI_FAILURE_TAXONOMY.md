@@ -32,3 +32,8 @@ Status: current evaluation and privacy-safe analytics vocabulary, 2026-08-13. Th
 - An eval case records the earliest causal category. The category describes what a failure would mean; a PASS result does not claim that a failure occurred.
 - Analytics may contain only the category token. It must not contain Need text, merchant text, screenshot data, candidate names, identifiers outside the schema, exception messages, stack traces, URLs, user-agent/IP values, or credentials.
 - `BLOCKED` and pytest skips are never counted as PASS.
+
+Phase 15 clarification: `STATE_RECOVERY_ERROR` also covers a replay or restore
+path that repeats a server-authoritative transition or accepts the same queued
+Job identity twice. This extends detection coverage; it does not create a new
+failure category.

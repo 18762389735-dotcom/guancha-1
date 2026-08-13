@@ -267,6 +267,11 @@ async def analyze_selection_session(session_id: UUID, client_id: ClientId, idemp
         result = staged[0]
         _emit(raw, event_name="analysis_started", resource_id=result.id, analytics_session=x_analytics_session_id, candidate_id=result.candidate_id, stage=result.stage.value, metadata={"processing_mode": result.processing_mode.value})
         return result
+    queued = await _service(raw).list_staged_extractions(session_id=session_id, client_id=client_id)
+    if queued:
+        # Replay returns the existing business anchor without redispatching or
+        # emitting a second server-authoritative transition.
+        return queued[0]
     job = await _decision_service(raw).analyze(session_id=session_id, client_id=client_id, idempotency_key=idempotency_key, task_runner=raw.app.state.task_runner, analytics_session_id=parse_analytics_session(x_analytics_session_id))
     result = _job(job)
     return result
