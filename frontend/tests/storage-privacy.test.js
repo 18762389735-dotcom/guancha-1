@@ -45,3 +45,48 @@ test('corrupt selection JSON is removed immediately and falls back safely', () =
   assert.deepEqual(JSON.parse(JSON.stringify(window.GuanchaStores.selectionBridge.load(fallback))), fallback);
   assert.equal(values.has(key), false);
 });
+
+test('schema v3 serializes only recovery anchors from hostile nested selection trees', () => {
+  const key = 'guancha.selection-bridge.v1';
+  const questionId = '11111111-1111-4111-8111-111111111111';
+  const candidateId = '33333333-3333-4333-8333-333333333333';
+  const { window, values } = loadStore();
+  window.GuanchaStores.selectionBridge.save({
+    sessionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    candidates: [{ id: 'local-candidate-123-0', serverCandidateId: candidateId, letter: 'A', extractionStatus: 'completed', name: 'secret', fields: { raw_text: 'merchant' }, extraction: { evidence: [{ text: 'reply' }] }, decision: { reasons: ['private'] }, riskFlags: ['private'], images: [{ id: 'local-image-123-abcd', serverImageId: '44444444-4444-4444-8444-444444444444', status: 'completed', previewUrl: 'data:image/png;base64,SECRET', file: { name: 'private.png', type: 'image/png' } }] }],
+    followupQuestions: [{ reply: { text: 'secret' } }], selectionAnswer: { summary: 'secret' }, lastDecisionDelta: { added_facts: ['secret'] }, jobIds: { arbitrary: 'secret' }, need: { taste: 'user free text' },
+    merchantReplyIds: { [questionId]: '22222222-2222-4222-8222-222222222222' },
+    merchantReplies: { [questionId]: { id: '22222222-2222-4222-8222-222222222222', candidate_id: candidateId, status: 'submitted', raw_text: 'secret' } },
+    unexpected: [{ summary: 'secret' }],
+  });
+  const persisted = JSON.parse(values.get(key));
+  assert.equal(persisted.schemaVersion, 3);
+  assert.equal(persisted.candidates.length, 1);
+  assert.equal(persisted.candidates[0].serverCandidateId, candidateId);
+  assert.equal(persisted.merchantReplyIds[questionId], '22222222-2222-4222-8222-222222222222');
+  assert.doesNotMatch(values.get(key), /secret|raw_text|previewUrl|data:image|followupQuestions|selectionAnswer|lastDecisionDelta|jobIds|need|unexpected/);
+});
+
+test('schema v3 rejects arrays invalid UUIDs open statuses and excessive anchors then rewrites backing', () => {
+  const key = 'guancha.selection-bridge.v1';
+  const candidate = index => ({ serverCandidateId: `${String(index).padStart(8, '0')}-1111-4111-8111-111111111111`, letter: String.fromCharCode(65 + index), extractionStatus: index ? 'made-up' : 'queued', images: Array.from({ length: 3 }, (_, image) => ({ serverImageId: `${String(image + 20).padStart(8, '0')}-2222-4222-8222-222222222222`, status: 'queued' })) });
+  const raw = JSON.stringify({ schemaVersion: 2, sessionId: 'not-a-uuid', candidates: Array.from({ length: 7 }, (_, index) => candidate(index)), merchantReplies: [], decisionVersionId: true, decisionStatus: 'private' });
+  const { window, values } = loadStore({ [key]: raw });
+  const loaded = window.GuanchaStores.selectionBridge.load({ candidates: [], merchantReplies: {} });
+  assert.equal(loaded.schemaVersion, 3);
+  assert.equal(loaded.sessionId, null);
+  assert.equal(loaded.candidates.length, 5);
+  assert.equal(loaded.candidates[0].images.length, 2);
+  assert.equal(loaded.candidates[1].extractionStatus, undefined);
+  assert.equal(loaded.decisionStatus, undefined);
+  assert.equal(JSON.parse(values.get(key)).schemaVersion, 3);
+});
+
+test('ui session is a closed anchor store and cannot retain reply text', () => {
+  const { window, values } = loadStore();
+  window.GuanchaStores.uiSession.save({ screen: 'result', activeCandidateId: '33333333-3333-4333-8333-333333333333', o1: { tea: ['绿茶', 'private reply'] }, o2: { flavors: ['兰花', 'merchant raw text'], sweetness: 75 }, overlay: { raw_text: 'secret' }, brew: { impression: 'secret' } });
+  const persisted = values.get(window.GuanchaStores.uiSession.key);
+  assert.match(persisted, /33333333-3333-4333-8333-333333333333/);
+  assert.match(persisted, /绿茶|兰花/);
+  assert.doesNotMatch(persisted, /private|merchant|raw_text|secret|overlay|brew/);
+});
