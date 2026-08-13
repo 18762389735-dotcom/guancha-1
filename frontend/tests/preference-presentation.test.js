@@ -70,6 +70,15 @@ test('history identity separates AI top candidate from user selection', () => {
   });
 });
 
+test('extraction risks accept only the semantic vocabulary and never raw text', () => {
+  const result = adapters().safeExtractionRiskFlags({ evidence_items: [
+    { field_name: 'risk_flag', normalized_value: 'season_claim_conflict', raw_text: 'allowed source text' },
+    { field_name: 'risk_flag', normalized_value: 'light-roast', raw_text: 'merchant raw reply' },
+    { field_name: 'risk_flag', normalized_value: null, raw_text: 'season_claim_conflict' },
+  ] });
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), ['season_claim_conflict']);
+});
+
 test('fit presentation uses explicit sensory and legacy need signals together', () => {
   const api = adapters();
   assert.equal(api.sensoryNeedMatch({ score_components: { explicit_sensory_need_match: 2, need_match: -1 } }), 1);

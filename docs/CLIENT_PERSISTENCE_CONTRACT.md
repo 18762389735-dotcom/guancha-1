@@ -46,6 +46,8 @@ are rebuilt from bounded field allowlists; unknown and nested selection objects
 are discarded. Selection history contains only date, safe candidate ids, and
 A-E recommended/selected labels. It contains no Need, candidate name, merchant
 reply, answer, evidence, reason, or Decision presentation.
+Warehouse risk values use an explicit semantic vocabulary; arbitrary ASCII
+tokens and Extraction `raw_text` are not eligible for persistence.
 
 The legacy `guancha-prototype-v2` key is never consulted for onboarding after
 startup. Missing new stores may receive a projection through their serializers,

@@ -257,7 +257,7 @@ function applyExtraction(candidate, extraction) {
   candidate.extractionStatus = 'completed';
   candidate.name = values.product_name || candidate.name || '商品信息待确认';
   candidate.type = [values.tea_category, values.tea_subtype, values.roast_or_style].filter(Boolean).join(' · ') || candidate.type || '信息待确认';
-  candidate.riskFlags = (extraction.evidence_items || []).filter((item) => item.field_name === 'risk_flag').map((item) => item.normalized_value || item.raw_text).filter(Boolean).slice(0, 3);
+  candidate.riskFlags = GuanchaAdapters.safeExtractionRiskFlags(extraction);
   const sourceImageIds = new Set(extraction.source_image_ids || [extraction.source_image_id].filter(Boolean));
   candidate.images = (candidate.images || []).map((image) => {
     if (!sourceImageIds.has(image.serverImageId)) return image;

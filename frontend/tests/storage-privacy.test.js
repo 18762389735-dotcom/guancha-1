@@ -91,6 +91,15 @@ test('ui session is a closed anchor store and cannot retain reply text', () => {
   assert.doesNotMatch(persisted, /private|merchant|raw_text|secret|overlay|brew/);
 });
 
+test('ui session removes corrupt scalar and array backing before fallback', () => {
+  const key = 'guancha.ui-session.v1';
+  for (const raw of ['{broken', '0', '[]']) {
+    const { window, values } = loadStore({ [key]: raw });
+    assert.deepEqual(JSON.parse(JSON.stringify(window.GuanchaStores.uiSession.load({ screen: 'home' }))), { screen: 'home' });
+    assert.equal(values.has(key), false);
+  }
+});
+
 test('legacy is cleared even when a new selection bridge already exists', () => {
   const selectionKey = 'guancha.selection-bridge.v1';
   const legacyKey = 'guancha-prototype-v2';
@@ -144,7 +153,7 @@ test('post-purchase store restores bounded warehouse journal and semantic histor
   const { window, values } = loadStore();
   const key = window.GuanchaStores.localPostPurchase.key;
   window.GuanchaStores.localPostPurchase.save({
-    warehouse: [{ id: 'tea-1', name: 'User tea', type: '乌龙茶', status: 'drinking', records: 1, facts: ['待补充', 'merchant raw reply'], risks: ['origin_claim_conflict', 'merchant raw reply'], merchantReply: { raw_text: 'secret' } }],
+    warehouse: [{ id: 'tea-1', name: 'User tea', type: '乌龙茶', status: 'drinking', records: 1, facts: ['待补充', 'merchant raw reply'], risks: ['origin_claim_conflict', 'merchant-raw-reply', 'light-roast'], risk_flags: ['season_claim_conflict', 'merchant-raw-reply', 'light-roast'], merchantReply: { raw_text: 'secret' } }],
     journalRecords: [{ id: 'record-123', date: '2026-08-13', teaId: 'tea-1', infusions: [{ number: 1, suggested: 10, actual: 11, reply: 'secret' }], plan: { ware: '盖碗', water: '110 ml', unknown: 'secret' }, feedback: { taste: '喜欢', impression: 'my note', merchant: { summary: 'secret' } }, feedbackAnalysis: { text: 'secret' } }],
     history: [{ date: '08.13', recommended_candidate_id: '33333333-3333-4333-8333-333333333333', recommended_candidate_label: 'A', selected_candidate_id: '44444444-4444-4444-8444-444444444444', selected_candidate_label: 'B', purpose: 'private Need', selected_candidate_name: 'private name', selectionAnswer: { summary: 'secret' } }],
     merchantReplies: [{ raw_text: 'secret' }],
@@ -153,6 +162,7 @@ test('post-purchase store restores bounded warehouse journal and semantic histor
   assert.equal(loaded.warehouse[0].name, 'User tea');
   assert.deepEqual(JSON.parse(JSON.stringify(loaded.warehouse[0].facts)), ['待补充']);
   assert.deepEqual(JSON.parse(JSON.stringify(loaded.warehouse[0].risks)), ['origin_claim_conflict']);
+  assert.deepEqual(JSON.parse(JSON.stringify(loaded.warehouse[0].risk_flags)), ['season_claim_conflict']);
   assert.equal(loaded.journalRecords[0].feedback.impression, 'my note');
   assert.deepEqual(JSON.parse(JSON.stringify(loaded.history[0])), { date: '08.13', recommended_candidate_id: '33333333-3333-4333-8333-333333333333', selected_candidate_id: '44444444-4444-4444-8444-444444444444', recommended_candidate_label: 'A', selected_candidate_label: 'B' });
   assert.doesNotMatch(values.get(key), /merchant|raw_text|selectionAnswer|private Need|private name|secret|feedbackAnalysis|unknown/);

@@ -134,8 +134,10 @@
     return {
       key,
       load(fallback) {
-        const raw = safeRead(key, null);
-        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return clone(fallback);
+        let raw;
+        try { raw = JSON.parse(global.localStorage.getItem(key)); }
+        catch { global.localStorage.removeItem(key); return clone(fallback); }
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) { if (global.localStorage.getItem(key)) global.localStorage.removeItem(key); return clone(fallback); }
         const cleaned = sanitize(raw); safeWrite(key, cleaned);
         return { ...clone(fallback), ...cleaned };
       },
@@ -152,6 +154,7 @@
   const preferenceSources = new Set(['tea','brewing','uncertain']);
   const warehouseFactTokens = new Set(['轻火焙制','2026 年春茶','支持 10g 试饮装','茶类已确认：白茶','茶类已确认：黑茶','来自本次截图提取','待补充']);
   const warehouseRiskTokens = new Set(['具体产地仍待确认','年份与产地未记录','原始购买信息待补','产地与年份待补','产地与年份未记录']);
+  const decisionRiskTokens = new Set(['season_claim_conflict','origin_claim_conflict','price_claim_conflict','价格或规格不支持可接受试错','不能从香型推导焙火程度','本次需求不应被长期偏好替代','营销词与可信度不存在等价关系','信息充分度不等同于商品真实性','冲突不能被正向信息抵消','试饮前仍需保留体验不确定性','未知价格不能视为符合预算']);
   function safeStringArray(value, limit = 8, itemLimit = 200) {
     return (Array.isArray(value) ? value : []).slice(0, limit).flatMap(item => {
       const safe = boundedString(item, itemLimit); return safe === null ? [] : [safe];
@@ -169,8 +172,8 @@
     for (const field of ['extraction_version_id','candidate_id','sourceDecisionId']) { const safe = safeUuid(value[field]); if (safe) result[field] = safe; }
     if (isIsoTimestamp(value.joined_at)) result.joined_at = value.joined_at;
     result.facts = safeStringArray(value.facts, 8, 200).filter(item => warehouseFactTokens.has(item));
-    result.risks = safeStringArray(value.risks, 8, 200).filter(item => warehouseRiskTokens.has(item) || /^[a-z0-9_-]{1,64}$/i.test(item));
-    result.risk_flags = safeStringArray(value.risk_flags, 8, 64).filter(item => /^[a-z0-9_-]+$/i.test(item));
+    result.risks = safeStringArray(value.risks, 8, 200).filter(item => warehouseRiskTokens.has(item) || decisionRiskTokens.has(item));
+    result.risk_flags = safeStringArray(value.risk_flags, 8, 80).filter(item => decisionRiskTokens.has(item));
     return result;
   }
   function journalAnchor(value) {

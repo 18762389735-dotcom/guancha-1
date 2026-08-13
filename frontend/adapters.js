@@ -7,6 +7,12 @@
     'not-recommended-now': '暂不建议',
     'insufficient-information': '信息不足，无法判断',
   };
+  const clientRiskFlags = new Set(['season_claim_conflict','origin_claim_conflict','price_claim_conflict','价格或规格不支持可接受试错','不能从香型推导焙火程度','本次需求不应被长期偏好替代','营销词与可信度不存在等价关系','信息充分度不等同于商品真实性','冲突不能被正向信息抵消','试饮前仍需保留体验不确定性','未知价格不能视为符合预算']);
+  function safeExtractionRiskFlags(extraction = {}) {
+    return (Array.isArray(extraction.evidence_items) ? extraction.evidence_items : [])
+      .filter(item => item?.field_name === 'risk_flag' && clientRiskFlags.has(item.normalized_value))
+      .map(item => item.normalized_value).slice(0, 3);
+  }
   function jobToCandidateStatus(job) {
     const status = job && job.status;
     return ['queued', 'processing', 'completed', 'failed', 'stale'].includes(status) ? status : 'empty';
@@ -121,5 +127,5 @@
     if (preferenceReference.length) lines.push(`${preferenceReference.map((item) => item.text).join('')}这只作为低置信口味参考，不会覆盖你这次的需求。`);
     return { lines, preferenceReference };
   }
-  global.GuanchaAdapters = { actionLabels, jobToCandidateStatus, candidateToViewModel, sensoryNeedMatch, invalidateDecisionState, prepareNeedUpdate, activeRecoveryScreen, candidateIdentity, resolveActiveCandidateIndex, buildSelectionHistoryIdentity, buildPreferenceReference, buildPersonalFitPresentation };
+  global.GuanchaAdapters = { actionLabels, safeExtractionRiskFlags, jobToCandidateStatus, candidateToViewModel, sensoryNeedMatch, invalidateDecisionState, prepareNeedUpdate, activeRecoveryScreen, candidateIdentity, resolveActiveCandidateIndex, buildSelectionHistoryIdentity, buildPreferenceReference, buildPersonalFitPresentation };
 }(window));
