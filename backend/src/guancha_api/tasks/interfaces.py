@@ -6,6 +6,6 @@ from uuid import UUID
 
 
 class TaskRunner(Protocol):
-    async def enqueue(self, *, job_id: UUID, task: Callable[[], Awaitable[None]]) -> None:
-        """Task boundary only; execution strategy is intentionally deferred."""
+    async def enqueue(self, *, job_id: UUID, task: Callable[[], Awaitable[None]]) -> bool:
+        """Return True only when this process newly accepts the job identity."""
         ...

@@ -17,18 +17,24 @@ class InProcessTaskRunner:
 
     def __init__(self) -> None:
         self._active_tasks: set[asyncio.Task[None]] = set()
+        self._active_job_ids: set[object] = set()
 
     @property
     def active_count(self) -> int:
         return len(self._active_tasks)
 
-    async def enqueue(self, *, job_id: object, task: Callable[[], Awaitable[None]]) -> None:
+    async def enqueue(self, *, job_id: object, task: Callable[[], Awaitable[None]]) -> bool:
+        if job_id in self._active_job_ids:
+            return False
         scheduled = asyncio.create_task(task(), name=f"guancha-job-{job_id}")
+        self._active_job_ids.add(job_id)
         self._active_tasks.add(scheduled)
         scheduled.add_done_callback(lambda completed: self._on_done(job_id, completed))
+        return True
 
     def _on_done(self, job_id: object, task: asyncio.Task[None]) -> None:
         self._active_tasks.discard(task)
+        self._active_job_ids.discard(job_id)
         if task.cancelled():
             logger.info("background_task_cancelled", extra={"job_id": str(job_id)})
             return
@@ -48,24 +54,33 @@ class InProcessTaskRunner:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         self._active_tasks.difference_update(tasks)
+        self._active_job_ids.clear()
 
 
 class ManualTaskRunner:
     def __init__(self) -> None:
-        self.tasks: list[Callable[[], Awaitable[None]]] = []
+        self.tasks: list[tuple[object, Callable[[], Awaitable[None]]]] = []
+        self._job_ids: set[object] = set()
 
     @property
     def pending_count(self) -> int:
         return len(self.tasks)
 
-    async def enqueue(self, *, job_id: object, task: Callable[[], Awaitable[None]]) -> None:
-        del job_id
-        self.tasks.append(task)
+    async def enqueue(self, *, job_id: object, task: Callable[[], Awaitable[None]]) -> bool:
+        if job_id in self._job_ids:
+            return False
+        self._job_ids.add(job_id)
+        self.tasks.append((job_id, task))
+        return True
 
     async def run_next(self) -> bool:
         if not self.tasks:
             return False
-        await self.tasks.pop(0)()
+        job_id, task = self.tasks.pop(0)
+        try:
+            await task()
+        finally:
+            self._job_ids.discard(job_id)
         return True
 
     async def drain(self) -> int:

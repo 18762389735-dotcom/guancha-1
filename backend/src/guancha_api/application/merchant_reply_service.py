@@ -47,11 +47,11 @@ class MerchantReplyService:
             idempotency_key=idempotency_key, request_hash=fingerprint,
         )
         if created:
-            await task_runner.enqueue(
+            accepted = await task_runner.enqueue(
                 job_id=job.id,
                 task=lambda: self.run_rejudge(job_id=job.id, reply_id=reply_id, client_id=client_id, fingerprint=fingerprint, analytics_session_id=analytics_session_id),
             )
-            if self.event_sink:
+            if accepted and self.event_sink:
                 safe_emit_server(self.event_sink, event_name="rejudge_started", resource_id=job.id, anonymous_session_id=analytics_session_id, stage="queued", metadata={"processing_mode": job.processing_mode.value if job.processing_mode else "test-fixture"})
         return job
 

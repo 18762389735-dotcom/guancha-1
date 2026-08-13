@@ -32,8 +32,8 @@ class SessionDecisionService:
             request_hash=fingerprint, need_snapshot=need_snapshot, expected_extraction_version_ids=expected_ids,
         )
         if created:
-            await task_runner.enqueue(job_id=job.id, task=lambda: self.run(job_id=job.id, session_id=session_id, client_id=client_id, fingerprint=fingerprint, need_snapshot=need_snapshot, inputs_snapshot=inputs, recent_preference_evidence=recent_preference_evidence, analytics_session_id=analytics_session_id))
-            if self.event_sink:
+            accepted = await task_runner.enqueue(job_id=job.id, task=lambda: self.run(job_id=job.id, session_id=session_id, client_id=client_id, fingerprint=fingerprint, need_snapshot=need_snapshot, inputs_snapshot=inputs, recent_preference_evidence=recent_preference_evidence, analytics_session_id=analytics_session_id))
+            if accepted and self.event_sink:
                 safe_emit_server(self.event_sink, event_name="analysis_started", resource_id=job.id, anonymous_session_id=analytics_session_id, stage="queued", metadata={"processing_mode": job.processing_mode.value if job.processing_mode else "test-fixture"})
         return job
 

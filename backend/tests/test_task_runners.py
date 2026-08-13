@@ -66,6 +66,29 @@ async def test_manual_runner_drain_and_empty_queue_are_explicit() -> None:
     assert calls == ["run", "run"]
 
 
+async def test_runners_reject_same_pending_job_and_release_identity_after_completion() -> None:
+    calls: list[str] = []
+    async def work() -> None: calls.append("run")
+
+    manual = ManualTaskRunner()
+    assert await manual.enqueue(job_id="same", task=work) is True
+    assert await manual.enqueue(job_id="same", task=work) is False
+    assert manual.pending_count == 1
+    assert await manual.run_next() is True
+    assert await manual.enqueue(job_id="same", task=work) is True
+    await manual.drain()
+    assert calls == ["run", "run"]
+
+    release = asyncio.Event()
+    async def blocked() -> None: await release.wait()
+    active = InProcessTaskRunner()
+    assert await active.enqueue(job_id="same", task=blocked) is True
+    assert await active.enqueue(job_id="same", task=blocked) is False
+    release.set(); await asyncio.sleep(0); await asyncio.sleep(0)
+    assert await active.enqueue(job_id="same", task=work) is True
+    await active.shutdown()
+
+
 def _payload() -> dict[str, object]:
     return {
         "evidence": [{

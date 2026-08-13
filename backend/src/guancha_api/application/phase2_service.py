@@ -51,15 +51,15 @@ class Phase2ExtractionService:
             if owns_worker_repository:
                 await worker_repository.close()
 
-    async def create_session(self, *, client_id: UUID, idempotency_key: UUID, need: SelectionNeedInput, recent_preference_evidence: tuple[dict[str, object], ...] = ()) -> SelectionSession:
+    async def create_session(self, *, client_id: UUID, idempotency_key: UUID, need: SelectionNeedInput, recent_preference_evidence: tuple[dict[str, object], ...] = ()) -> tuple[SelectionSession, bool]:
         now = datetime.now(timezone.utc)
         evidence = tuple(item for item in recent_preference_evidence if item.get("confidence") == "low")[-12:]
-        row, _ = await self.repository.create_selection_session(
+        row, created = await self.repository.create_selection_session(
             session_id=uuid4(), client_id=client_id, idempotency_key=idempotency_key,
             request_hash=request_hash({"need": need.model_dump(mode="json"), "recent_preference_evidence": evidence}), need=need.model_dump(mode="json"), recent_preference_evidence=evidence,
             expires_at=now + timedelta(days=15),
         )
-        return self._session(row)
+        return self._session(row), created
 
     async def get_session(self, *, client_id: UUID, session_id: UUID) -> SelectionSession:
         return self._session(await self.repository.get_selection_session_for_client(session_id=session_id, client_id=client_id))
@@ -72,11 +72,11 @@ class Phase2ExtractionService:
         )
         return self._session(row)
 
-    async def create_candidate(self, *, client_id: UUID, session_id: UUID, idempotency_key: UUID, request: CreateCandidateRequest) -> Candidate:
+    async def create_candidate(self, *, client_id: UUID, session_id: UUID, idempotency_key: UUID, request: CreateCandidateRequest) -> tuple[Candidate, bool]:
         row, created = await self.repository.create_candidate(candidate_id=uuid4(), session_id=session_id, client_id=client_id, label=request.display_label, display_name=request.display_name, idempotency_key=idempotency_key, request_hash=request_hash(request.model_dump(mode="json")))
         if created:
             await self.repository.stale_current_decision_for_session(session_id=session_id)
-        return self._candidate(row)
+        return self._candidate(row), created
 
     async def list_candidates(self, *, client_id: UUID, session_id: UUID) -> tuple[Candidate, ...]:
         return tuple(self._candidate(row) for row in await self.repository.list_candidates_for_session(session_id=session_id, client_id=client_id))
@@ -93,7 +93,7 @@ class Phase2ExtractionService:
         self, *, client_id: UUID, candidate_id: UUID, idempotency_key: UUID,
         data: bytes, declared_content_type: str, storage: TemporaryPrivateStorage,
         task_runner: InProcessTaskRunner | ManualTaskRunner, provider: StructuredVisionProvider,
-    ) -> UploadCandidateImageResponse:
+    ) -> tuple[UploadCandidateImageResponse, bool]:
         image = sanitize_image_upload(data=data, declared_content_type=declared_content_type)
         # The stable request digest binds the logical target to sanitized pixels.
         digest = request_hash({"candidate_id": str(candidate_id), "sanitized_sha256": image.sanitized_sha256, "content_type": image.content_type})
@@ -110,7 +110,7 @@ class Phase2ExtractionService:
             candidate_id=candidate_id, client_id=client_id, idempotency_key=idempotency_key, request_hash=digest
         )
         if replay is not None:
-            return self._upload_response(replay.image, replay.job)
+            return self._upload_response(replay.image, replay.job), False
         try:
             await storage.put_private(object_key=object_key, content_type=image.content_type, data=image.data)
         except Exception as storage_error:
@@ -141,7 +141,7 @@ class Phase2ExtractionService:
             # With a deterministic content-bound key this is the winner's
             # object too. Deleting it here would turn a correct concurrent
             # replay into a queued Job with no private image.
-            return self._upload_response(result.image, result.job)
+            return self._upload_response(result.image, result.job), False
         await self.repository.stale_current_decision_for_candidate(candidate_id=candidate_id)
         # External vision calls are deliberately staged.  Dispatch happens
         # only after the user starts selection analysis, allowing a two-image
@@ -149,7 +149,7 @@ class Phase2ExtractionService:
         # FakeProvider keeps the established immediate-dispatch unit-test
         # semantics; it never reaches a network or real model.
         if isinstance(provider, (MiMoVisionProvider, OpenAIResponsesProvider)):
-            return self._upload_response(result.image, result.job)
+            return self._upload_response(result.image, result.job), True
         try:
             await task_runner.enqueue(
                 job_id=result.job.id,
@@ -162,7 +162,7 @@ class Phase2ExtractionService:
                 job_id=result.job.id, error_code=ErrorCode.WORKER_INTERRUPTED
             )
             raise TaskEnqueueError("Task runner did not accept the queued job") from enqueue_error
-        return self._upload_response(result.image, result.job)
+        return self._upload_response(result.image, result.job), True
 
     async def start_staged_extractions(
         self, *, session_id: UUID, client_id: UUID,
@@ -176,7 +176,7 @@ class Phase2ExtractionService:
         started: list[AnalysisJobResponse] = []
         for job in jobs:
             try:
-                await task_runner.enqueue(
+                accepted = await task_runner.enqueue(
                     job_id=job.id,
                     task=lambda job_id=job.id: self._run_extraction_job(
                         job_id=job_id, provider=provider, storage=storage
@@ -189,7 +189,8 @@ class Phase2ExtractionService:
                 raise TaskEnqueueError(
                     "Task runner did not accept the staged extraction job"
                 ) from enqueue_error
-            started.append(self._job_response(job))
+            if accepted:
+                started.append(self._job_response(job))
         return tuple(started)
 
     async def delete_image(

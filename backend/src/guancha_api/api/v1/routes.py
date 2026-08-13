@@ -181,12 +181,13 @@ async def analyze_brew_feedback(
 
 @router.post("/selection-sessions", response_model=SelectionSession, status_code=201)
 async def create_selection_session(request: CreateSelectionSessionRequest, client_id: ClientId, idempotency_key: IdempotencyKey, raw: Request, x_analytics_session_id: AnalyticsSession = None) -> SelectionSession:
-    result = await _service(raw).create_session(
+    result, created = await _service(raw).create_session(
         client_id=client_id, idempotency_key=idempotency_key, need=request.need,
         recent_preference_evidence=request.recent_preference_evidence,
     )
-    _emit(raw, event_name="need_submitted", resource_id=result.id, analytics_session=x_analytics_session_id,
-          metadata={"has_budget": bool(request.need.budget_text), "has_sensory_need": bool(request.need.taste_text)})
+    if created:
+        _emit(raw, event_name="need_submitted", resource_id=result.id, analytics_session=x_analytics_session_id,
+              metadata={"has_budget": bool(request.need.budget_text), "has_sensory_need": bool(request.need.taste_text)})
     return result
 
 @router.get("/selection-sessions/{session_id}", response_model=SelectionSession)
@@ -199,10 +200,11 @@ async def update_selection_session(session_id: UUID, request: UpdateSelectionNee
 
 @router.post("/selection-sessions/{session_id}/candidates", response_model=Candidate, status_code=201)
 async def create_candidate(session_id: UUID, request: CreateCandidateRequest, client_id: ClientId, idempotency_key: IdempotencyKey, raw: Request, x_analytics_session_id: AnalyticsSession = None) -> Candidate:
-    result = await _service(raw).create_candidate(
+    result, created = await _service(raw).create_candidate(
         client_id=client_id, session_id=session_id, idempotency_key=idempotency_key, request=request
     )
-    _emit(raw, event_name="candidate_created", resource_id=result.id, analytics_session=x_analytics_session_id, candidate_id=result.id)
+    if created:
+        _emit(raw, event_name="candidate_created", resource_id=result.id, analytics_session=x_analytics_session_id, candidate_id=result.id)
     return result
 
 @router.get("/selection-sessions/{session_id}/candidates", response_model=tuple[Candidate, ...])
@@ -222,8 +224,9 @@ async def delete_candidate(candidate_id: UUID, client_id: ClientId, raw: Request
 async def upload_candidate_image(candidate_id: UUID, client_id: ClientId, idempotency_key: IdempotencyKey, raw: Request, file: Annotated[UploadFile, File()], x_analytics_session_id: AnalyticsSession = None) -> UploadCandidateImageResponse:
     data = await file.read(5_242_881)
     try:
-        result = await _service(raw).upload_image(client_id=client_id, candidate_id=candidate_id, idempotency_key=idempotency_key, data=data, declared_content_type=file.content_type or '', storage=raw.app.state.temporary_storage, task_runner=raw.app.state.task_runner, provider=raw.app.state.provider)
-        _emit(raw, event_name="candidate_image_added", resource_id=result.image.id, analytics_session=x_analytics_session_id, candidate_id=candidate_id)
+        result, created = await _service(raw).upload_image(client_id=client_id, candidate_id=candidate_id, idempotency_key=idempotency_key, data=data, declared_content_type=file.content_type or '', storage=raw.app.state.temporary_storage, task_runner=raw.app.state.task_runner, provider=raw.app.state.provider)
+        if created:
+            _emit(raw, event_name="candidate_image_added", resource_id=result.image.id, analytics_session=x_analytics_session_id, candidate_id=candidate_id)
         return result
     except ValueError as exc:
         code = getattr(exc, "error_code", ErrorCode.UNSAFE_OR_CORRUPT_IMAGE)
