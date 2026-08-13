@@ -6,11 +6,11 @@ from pathlib import Path
 from guancha_api.product_events import FailureCategory
 
 
-def test_ai_eval_manifest_has_29_closed_cases_and_real_nodeids() -> None:
+def test_ai_eval_manifest_has_30_closed_cases_and_real_nodeids() -> None:
     root = Path(__file__).resolve().parents[2]
     cases = json.loads((root / "backend/evaluation/ai_eval_cases.json").read_text(encoding="utf-8"))
-    assert len(cases) == 29
-    assert len({case["case_id"] for case in cases}) == 29
+    assert len(cases) == 30
+    assert len({case["case_id"] for case in cases}) == 30
     allowed = set(FailureCategory.__args__)
     assert all(case["failure_category"] in allowed for case in cases)
     assert all(case["pytest_nodeids"] for case in cases)

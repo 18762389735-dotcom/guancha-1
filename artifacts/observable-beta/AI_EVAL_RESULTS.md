@@ -1,16 +1,16 @@
 # AI Eval Results
 
-Run at: 2026-08-13T00:35:32.366467+00:00
+Run at: 2026-08-13T01:00:32.295891+00:00
 
 This is the fixed deterministic/fixture test-set result, not real-world model accuracy.
 No Provider network call or API key access is performed.
 
 ## Totals
 
-- Total: 29
+- Total: 30
 - PASS: 26
 - FAIL: 0
-- BLOCKED: 3
+- BLOCKED: 4
 
 ## Cases
 
@@ -43,8 +43,9 @@ No Provider network call or API key access is performed.
 | REJ-03 | database_integration | Rejudge and Delta | REJUDGE_INCONSISTENT | BLOCKED |
 | ANS-01 | deterministic_unit | Decision Answer | DECISION_ANSWER_MISMATCH | PASS |
 | STATE-01 | database_integration | State Safety | DECISION_STATE_STALE | BLOCKED |
-| STATE-02 | deterministic_unit | State Safety | STATE_RECOVERY_ERROR | PASS |
+| REPLAY-EDGE-01 | deterministic_unit | Replay Created Edge | STATE_RECOVERY_ERROR | PASS |
 | STATE-03 | deterministic_unit | State Safety | STATE_RECOVERY_ERROR | PASS |
+| REPLAY-DB-01 | database_integration | Replay Exactly Once | DATABASE_ERROR | BLOCKED |
 
 ## By category
 
@@ -55,8 +56,10 @@ No Provider network call or API key access is performed.
 - Merchant Reply: PASS 4 / FAIL 0 / BLOCKED 0
 - Question: PASS 3 / FAIL 0 / BLOCKED 0
 - Rejudge and Delta: PASS 1 / FAIL 0 / BLOCKED 2
+- Replay Created Edge: PASS 1 / FAIL 0 / BLOCKED 0
+- Replay Exactly Once: PASS 0 / FAIL 0 / BLOCKED 1
 - Sensory Translation: PASS 3 / FAIL 0 / BLOCKED 0
-- State Safety: PASS 2 / FAIL 0 / BLOCKED 1
+- State Safety: PASS 1 / FAIL 0 / BLOCKED 1
 
 ## Boundary
 
